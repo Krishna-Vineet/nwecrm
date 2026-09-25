@@ -1,0 +1,442 @@
+// ============================================================
+// Mock database — seed data for the HappyPix CRM v2 demo.
+// Persists to localStorage so edits survive reloads.
+// "Today" in the seed world: 24 Sep 2026.
+// ============================================================
+
+import { FRAME_CATALOGUE } from '../../lib/frames.js'
+import { slotsFor } from '../../lib/templates.js'
+
+const DB_KEY = 'happypix_crm_v2_db'
+const DB_VERSION = 3
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0
+    let t = Math.imul(a ^ (a >>> 15), 1 | a)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const NOW = new Date('2026-09-24T11:30:00+05:30')
+const D = (s) => new Date(s).toISOString()
+const daysAgo = (n, h = 10, m = 0) => {
+  const d = new Date(NOW)
+  d.setDate(d.getDate() - n)
+  d.setHours(h, m, 0, 0)
+  return d.toISOString()
+}
+const daysAhead = (n, h = 18, m = 0) => {
+  const d = new Date(NOW)
+  d.setDate(d.getDate() + n)
+  d.setHours(h, m, 0, 0)
+  return d.toISOString()
+}
+
+// small SVG data-URI helpers for seed artwork
+const bgSvg = (c1, c2 = null, label = '') => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2 || c1}"/></linearGradient></defs><rect width="400" height="600" fill="url(#g)"/>${label ? `<text x="200" y="320" font-family="Georgia" font-style="italic" font-size="30" fill="rgba(255,255,255,0.85)" text-anchor="middle">${label}</text>` : ''}</svg>`
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+}
+const logoSvg = (initials, color) => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><circle cx="60" cy="60" r="54" fill="${color}"/><text x="60" y="74" font-family="Georgia" font-size="44" font-style="italic" fill="#fff" text-anchor="middle">${initials}</text></svg>`
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+}
+
+// ---------------- Templates (global, platform-owned — Architecture V1) ----------------
+const T = (id, name, category, imageScope, orientation, slotCount, extra = {}) => ({
+  id,
+  name,
+  description: extra.description || '',
+  category,
+  imageScope,
+  orientation: imageScope === 'specific' ? orientation : 'universal',
+  slotCount: imageScope === 'specific' ? slotCount : 0,
+  canvas: imageScope === 'specific' ? slotsFor(orientation, slotCount).canvas : { width: 1200, height: 1800 },
+  photoSlots: imageScope === 'specific' ? slotsFor(orientation, slotCount).photoSlots : [],
+  backgroundUrl: extra.backgroundUrl || null,
+  source: extra.source || 'manual',
+  status: extra.status || 'published',
+  active: extra.active !== false,
+  usage: extra.usage || 0,
+  createdAt: extra.createdAt || daysAgo(200),
+  updatedAt: extra.updatedAt || daysAgo(30),
+})
+
+const TEMPLATES = [
+  T('tpl-46-duo', '4x6 Duo', 'Classic', 'specific', 'portrait', 2, { description: 'Two stacked photos on a 4×6 print. The everyday workhorse.', usage: 131, createdAt: daysAgo(300), updatedAt: daysAgo(90) }),
+  T('tpl-strip-3', 'Strip 3', 'Classic', 'specific', 'strip', 3, { description: 'Classic three-shot photo strip.', usage: 87, createdAt: daysAgo(280), updatedAt: daysAgo(40) }),
+  T('tpl-wide-grid4', 'Wide 4x6 Grid 4', 'Parties', 'specific', 'landscape', 4, { description: 'Four photos across a wide 4×6. Great for group shots.', usage: 63, createdAt: daysAgo(220), updatedAt: daysAgo(15) }),
+  T('tpl-46-grid6', '4x6 Grid 6', 'Weddings', 'specific', 'portrait', 6, { description: 'Six moments on one print — the house favourite for weddings.', usage: 54, createdAt: daysAgo(240), updatedAt: daysAgo(34) }),
+  T('tpl-square-4', 'Square Grid 4', 'Corporate', 'specific', 'square', 4, { description: 'Four squares on 6×6. Clean for corporate activations.', usage: 28, createdAt: daysAgo(120), updatedAt: daysAgo(45) }),
+  T('tpl-wide-strip2', 'Wide Strip 2', 'Corporate', 'specific', 'landscape', 2, { description: 'Two wide photos side by side.', usage: 19, createdAt: daysAgo(110), updatedAt: daysAgo(60) }),
+  T('tpl-royal-bg', 'Royal Wedding Background', 'Weddings', 'general', null, 0, { description: 'Ornate royal canvas — fits any layout. The wedding signature.', backgroundUrl: bgSvg('#5F4CAA', '#3A3170', 'Royal Wedding'), usage: 87, createdAt: daysAgo(260), updatedAt: daysAgo(20) }),
+  T('tpl-neon-bg', 'Neon Glow Background', 'Parties', 'general', null, 0, { description: 'Magenta-to-purple glow canvas for club nights.', backgroundUrl: bgSvg('#EA097F', '#5F4CAA'), source: 'ai_generated', usage: 42, createdAt: daysAgo(90), updatedAt: daysAgo(12) }),
+  T('tpl-kids', 'Kids Fun 4x6', 'Celebrations', 'specific', 'portrait', 4, { description: 'Playful four-frame layout for kids events.', active: false, usage: 19, createdAt: daysAgo(90), updatedAt: daysAgo(15) }),
+]
+
+// ---------------- Users ----------------
+const USERS = [
+  { id: 'usr-owner', name: 'Harshit Mehta', email: 'owner@happypix.com', password: 'demo123', role: 'OWNER', organizationId: null, status: 'active', photoUrl: null, createdAt: daysAgo(420), lastLoginAt: daysAgo(0, 8, 12) },
+  { id: 'usr-pa', name: 'Priya Nair', email: 'priya@happypix.com', password: 'demo123', role: 'PLATFORM_ADMIN', organizationId: null, status: 'active', photoUrl: null, createdAt: daysAgo(310), lastLoginAt: daysAgo(0, 9, 4) },
+  { id: 'usr-sm', name: 'Arjun Rao', email: 'support@happypix.com', password: 'demo123', role: 'SUPPORT_MANAGER', organizationId: null, status: 'active', photoUrl: null, createdAt: daysAgo(280), lastLoginAt: daysAgo(1, 18, 30) },
+
+  { id: 'usr-sana', name: 'Sana Kapoor', email: 'sana@sunsetweddings.com', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-sunset', status: 'active', createdAt: daysAgo(160), lastLoginAt: daysAgo(0, 10, 2) },
+  { id: 'usr-rohit', name: 'Rohit Das', email: 'rohit@sunsetweddings.com', password: 'demo123', role: 'ORG_MANAGER', organizationId: 'org-sunset', status: 'active', createdAt: daysAgo(120), lastLoginAt: daysAgo(2, 16, 0) },
+  { id: 'usr-kunal', name: 'Kunal Aneja', email: 'kunal@kade.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-kade', status: 'active', createdAt: daysAgo(52), lastLoginAt: daysAgo(1, 12, 40) },
+  { id: 'usr-arpita', name: 'Arpita Shah', email: 'arpita@pika.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-pika', status: 'active', createdAt: daysAgo(172), lastLoginAt: daysAgo(3, 11, 15) },
+  { id: 'usr-vikram', name: 'Vikram Sethi', email: 'vikram@techcloset.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-tech', status: 'active', createdAt: daysAgo(37), lastLoginAt: daysAgo(0, 9, 48) },
+  { id: 'usr-meera', name: 'Meera Iyer', email: 'meera@techcloset.in', password: 'demo123', role: 'ORG_MANAGER', organizationId: 'org-tech', status: 'active', createdAt: daysAgo(30), lastLoginAt: daysAgo(4, 15, 20) },
+  { id: 'usr-vishal', name: 'Vishal Gupta', email: 'vishal@vishalstudio.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-vishal', status: 'active', createdAt: daysAgo(5), lastLoginAt: daysAgo(0, 10, 30) },
+  { id: 'usr-aakash', name: 'Aakash Verma', email: 'aakash@alphabooths.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-alpha', status: 'active', createdAt: daysAgo(135), lastLoginAt: daysAgo(42, 12, 0) },
+  { id: 'usr-riya', name: 'Riya Malhotra', email: 'riya@riyacelebrations.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-riya', status: 'active', createdAt: daysAgo(106), lastLoginAt: daysAgo(13, 17, 45) },
+  { id: 'usr-gaurav', name: 'Gaurav Khan', email: 'gaurav@glowparty.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-glow', status: 'active', createdAt: daysAgo(145), lastLoginAt: daysAgo(50, 12, 0) },
+  { id: 'usr-nandini', name: 'Nandini Bose', email: 'nandini@novaoccasions.in', password: 'demo123', role: 'ORG_ADMIN', organizationId: 'org-nova', status: 'active', createdAt: daysAgo(8), lastLoginAt: daysAgo(0, 8, 55) },
+]
+
+// ---------------- Organisations ----------------
+const ORGS = [
+  { id: 'org-sunset', name: 'Sunset Weddings', ownerName: 'Sana Kapoor', email: 'sana@sunsetweddings.com', phone: '+91 98100 22331', country: 'IN', plan: 'business', status: 'active', logoUrl: null, createdAt: daysAgo(160), lastActiveAt: daysAgo(0, 9, 58), suspendReason: null },
+  { id: 'org-kade', name: 'Kade Events', ownerName: 'Kunal Aneja', email: 'kunal@kade.in', phone: '+91 99530 44112', country: 'IN', plan: 'starter', status: 'active', logoUrl: null, createdAt: daysAgo(52), lastActiveAt: daysAgo(1, 20, 14), suspendReason: null },
+  { id: 'org-pika', name: 'Pika Photography', ownerName: 'Arpita Shah', email: 'arpita@pika.in', phone: '+91 98211 77020', country: 'IN', plan: 'professional', status: 'active', logoUrl: null, createdAt: daysAgo(172), lastActiveAt: daysAgo(0, 8, 30), suspendReason: null },
+  { id: 'org-tech', name: 'Tech Closet', ownerName: 'Vikram Sethi', email: 'vikram@techcloset.in', phone: '+91 97170 88990', country: 'IN', plan: 'business', status: 'trial', logoUrl: null, createdAt: daysAgo(37), lastActiveAt: daysAgo(0, 10, 41), suspendReason: null },
+  { id: 'org-vishal', name: 'Vishal Studio', ownerName: 'Vishal Gupta', email: 'vishal@vishalstudio.in', phone: '+91 98111 33445', country: 'IN', plan: 'starter', status: 'active', logoUrl: null, createdAt: daysAgo(5), lastActiveAt: daysAgo(0, 7, 12), suspendReason: null },
+  { id: 'org-alpha', name: 'Alpha Booths', ownerName: 'Aakash Verma', email: 'aakash@alphabooths.in', phone: '+91 98990 11223', country: 'IN', plan: 'basic', status: 'expired', logoUrl: null, createdAt: daysAgo(135), lastActiveAt: daysAgo(42, 19, 0), suspendReason: null },
+  { id: 'org-riya', name: 'Riya Celebrations', ownerName: 'Riya Malhotra', email: 'riya@riyacelebrations.in', phone: '+91 99100 55667', country: 'IN', plan: 'starter', status: 'suspended', logoUrl: null, createdAt: daysAgo(106), lastActiveAt: daysAgo(14, 11, 0), suspendReason: 'Repeated billing disputes and failed renewals. Reviewed on 10 Sep 2026.' },
+  { id: 'org-glow', name: 'Glow Party Co', ownerName: 'Gaurav Khan', email: 'gaurav@glowparty.in', phone: '+91 98760 99887', country: 'IN', plan: 'basic', status: 'banned', logoUrl: null, createdAt: daysAgo(145), lastActiveAt: daysAgo(51, 12, 0), suspendReason: 'Fraudulent coupon abuse and payment chargeback. Banned 04 Aug 2026.' },
+  { id: 'org-nova', name: 'Nova Occasions', ownerName: 'Nandini Bose', email: 'nandini@novaoccasions.in', phone: '+91 98330 66778', country: 'IN', plan: 'trial', status: 'trial', logoUrl: null, createdAt: daysAgo(8), lastActiveAt: daysAgo(0, 9, 5), suspendReason: null },
+]
+
+// ---------------- Subscriptions (server-owned billing records) ----------------
+const SUBSCRIPTIONS = [
+  { id: 'sub-sunset', organizationId: 'org-sunset', plan: 'business', amount: 9999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-04-15T10:00:00+05:30'), startDate: D('2026-04-15T10:00:00+05:30'), endDate: D('2026-10-15T10:00:00+05:30'), invoice: 'HAP-INV-2604-118' },
+  { id: 'sub-kade', organizationId: 'org-kade', plan: 'starter', amount: 1999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-08-03T12:00:00+05:30'), startDate: D('2026-08-03T12:00:00+05:30'), endDate: D('2026-11-03T12:00:00+05:30'), invoice: 'HAP-INV-2608-342' },
+  { id: 'sub-pika', organizationId: 'org-pika', plan: 'professional', amount: 5999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-04-05T11:00:00+05:30'), startDate: D('2026-04-05T11:00:00+05:30'), endDate: D('2026-10-05T11:00:00+05:30'), invoice: 'HAP-INV-2604-091' },
+  { id: 'sub-tech', organizationId: 'org-tech', plan: 'business', amount: 0, currency: 'INR', gateway: 'trial', paidAt: null, startDate: D('2026-08-18T12:00:00+05:30'), endDate: D('2026-09-01T12:00:00+05:30'), invoice: null, extended: D('2026-09-02T12:00:00+05:30'), extendedTo: D('2026-10-02T12:00:00+05:30'), extendedNote: 'Trial extended once (platform goodwill)' },
+  { id: 'sub-vishal', organizationId: 'org-vishal', plan: 'starter', amount: 1999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-09-19T15:00:00+05:30'), startDate: D('2026-09-19T15:00:00+05:30'), endDate: D('2026-12-19T15:00:00+05:30'), invoice: 'HAP-INV-2609-401' },
+  { id: 'sub-alpha', organizationId: 'org-alpha', plan: 'basic', amount: 2999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-05-12T10:00:00+05:30'), startDate: D('2026-05-12T10:00:00+05:30'), endDate: D('2026-08-12T10:00:00+05:30'), invoice: 'HAP-INV-2605-214' },
+  { id: 'sub-riya', organizationId: 'org-riya', plan: 'starter', amount: 1999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-06-10T13:00:00+05:30'), startDate: D('2026-06-10T13:00:00+05:30'), endDate: D('2026-09-10T13:00:00+05:30'), invoice: 'HAP-INV-2606-275' },
+  { id: 'sub-glow', organizationId: 'org-glow', plan: 'basic', amount: 2999, currency: 'INR', gateway: 'razorpay', paidAt: D('2026-05-02T12:00:00+05:30'), startDate: D('2026-05-02T12:00:00+05:30'), endDate: D('2026-08-02T12:00:00+05:30'), invoice: 'HAP-INV-2605-166' },
+  { id: 'sub-nova', organizationId: 'org-nova', plan: 'trial', amount: 0, currency: 'INR', gateway: 'trial', paidAt: null, startDate: D('2026-09-16T10:00:00+05:30'), endDate: D('2026-09-30T10:00:00+05:30'), invoice: null },
+]
+
+// ---------------- Devices (UUID pairing model) ----------------
+const uuid = (s) => s
+const DEVICES = [
+  { id: 'dev-sun-1', organizationId: 'org-sunset', deviceUuid: uuid('f47ac10b-58cc-4372-a567-0e02b2c3d471'), deviceName: 'Booth 01 — Main Hall', location: 'New Delhi', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(0, 11, 26), registeredAt: daysAgo(158), status: 'active', assignedEventId: 'evt-sun-1' },
+  { id: 'dev-sun-2', organizationId: 'org-sunset', deviceUuid: uuid('1b671a64-40d5-471d-9ca0-4d1c3b2a9f02'), deviceName: 'Booth 02 — Lawn', location: 'New Delhi', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(0, 10, 58), registeredAt: daysAgo(120), status: 'active', assignedEventId: 'evt-sun-1' },
+  { id: 'dev-sun-3', organizationId: 'org-sunset', deviceUuid: uuid('9c1b2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e'), deviceName: 'Booth 03 — Rooftop', location: 'Gurugram', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(0, 9, 12), registeredAt: daysAgo(90), status: 'active', assignedEventId: null },
+  { id: 'dev-sun-4', organizationId: 'org-sunset', deviceUuid: uuid('0a9b8c7d-6e5f-4a3b-2c1d-0e9f8a7b6c5d'), deviceName: 'Booth 04 — Travel Unit', location: 'Faridabad', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(6, 21, 30), registeredAt: daysAgo(75), status: 'active', assignedEventId: null },
+  { id: 'dev-kade-1', organizationId: 'org-kade', deviceUuid: uuid('c3d4e5f6-a7b8-49c0-d1e2-f3a4b5c6d7e8'), deviceName: 'KADE Main Booth', location: 'Rohini, Delhi', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(1, 19, 42), registeredAt: daysAgo(50), status: 'active', assignedEventId: 'evt-kade-1' },
+  { id: 'dev-pika-1', organizationId: 'org-pika', deviceUuid: uuid('e5f6a7b8-c9d0-4e1f-a2b3-c4d5e6f7a8b9'), deviceName: 'Pika Studio Booth', location: 'Andheri, Mumbai', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(0, 11, 5), registeredAt: daysAgo(170), status: 'active', assignedEventId: 'evt-pika-1' },
+  { id: 'dev-pika-2', organizationId: 'org-pika', deviceUuid: uuid('a2b3c4d5-e6f7-4a8b-b9c0-d1e2f3a4b5c6'), deviceName: 'Pika Outfield', location: 'Thane', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(2, 17, 20), registeredAt: daysAgo(140), status: 'active', assignedEventId: null },
+  { id: 'dev-pika-3', organizationId: 'org-pika', deviceUuid: uuid('b7c8d9e0-f1a2-4b3c-c4d5-e6f7a8b9c0d1'), deviceName: 'Pika Corporate', location: 'Bandra, Mumbai', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(1, 14, 8), registeredAt: daysAgo(60), status: 'active', assignedEventId: null },
+  { id: 'dev-tech-1', organizationId: 'org-tech', deviceUuid: uuid('d9e0f1a2-b3c4-4d5e-e6f7-a8b9c0d1e2f3'), deviceName: 'TechCloset S24', location: 'Pitampura, Delhi', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(0, 10, 44), registeredAt: daysAgo(35), status: 'active', assignedEventId: 'evt-tech-1' },
+  { id: 'dev-tech-2', organizationId: 'org-tech', deviceUuid: uuid('f1a2b3c4-d5e6-4f7a-a8b9-c0d1e2f3a4b5'), deviceName: 'TechCloset iPad', location: 'Pitampura, Delhi', hardware: ['camera', 'wifi'], lastSeenAt: daysAgo(3, 12, 0), registeredAt: daysAgo(28), status: 'active', assignedEventId: null },
+  { id: 'dev-vish-1', organizationId: 'org-vishal', deviceUuid: uuid('a4b5c6d7-e8f9-4a0b-b1c2-d3e4f5a6b7c8'), deviceName: 'Vishal Booth A', location: 'Ludhiana', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(0, 7, 5), registeredAt: daysAgo(4), status: 'active', assignedEventId: 'evt-vish-1' },
+  { id: 'dev-alpha-1', organizationId: 'org-alpha', deviceUuid: uuid('c6d7e8f9-a0b1-4c2d-c3d4-e5f6a7b8c9d0'), deviceName: 'Alpha One', location: 'Jaipur', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(42, 18, 40), registeredAt: daysAgo(130), status: 'active', assignedEventId: null },
+  { id: 'dev-riya-1', organizationId: 'org-riya', deviceUuid: uuid('d8e9f0a1-b2c3-4d4e-d5e6-f7a8b9c0d1e2'), deviceName: 'Riya Booth', location: 'Dehradun', hardware: ['camera', 'printer'], lastSeenAt: daysAgo(14, 10, 30), registeredAt: daysAgo(100), status: 'active', assignedEventId: null },
+  { id: 'dev-nova-1', organizationId: 'org-nova', deviceUuid: uuid('e0f1a2b3-c4d5-4e6e-e7f8-a9b0c1d2e3f4'), deviceName: 'Nova Test Booth', location: 'Kolkata', hardware: ['camera', 'printer', 'wifi'], lastSeenAt: daysAgo(0, 9, 58), registeredAt: daysAgo(7), status: 'active', assignedEventId: 'evt-nova-1' },
+]
+
+// ---------------- Events (v2 shape: no passkey, no print price) ----------------
+// fields: digitalCopy (guests can order a digital copy), filters (allowed
+// photo filters), templateIds (global templates shown at the booth),
+// branding (footer logo — default none — + tagline, editable later).
+const EVENTS = [
+  { id: 'evt-sun-1', organizationId: 'org-sunset', name: 'Kapoor–Verma Wedding', clientName: 'Rohan Kapoor', location: 'ITC Maurya, New Delhi', startDate: D('2026-09-23T18:00:00+05:30'), endDate: D('2026-09-25T01:00:00+05:30'), paused: false, templateIds: ['tpl-46-grid6', 'tpl-strip-3'], filters: ['warm', 'bw', 'vintage'], digitalCopy: true, branding: { logoUrl: logoSvg('SK', '#5F4CAA'), tagline: 'Kapoor–Verma • ITC Maurya' }, shortCode: 'KAPWED', createdAt: daysAgo(20) },
+  { id: 'evt-sun-2', organizationId: 'org-sunset', name: 'Sharma Anniversary Gala', clientName: 'Suresh Sharma', location: 'The Leela, Gurugram', startDate: daysAhead(12, 19), endDate: daysAhead(12, 23, 30), paused: false, templateIds: ['tpl-wide-grid4', 'tpl-wide-strip2'], filters: ['warm', 'party'], digitalCopy: true, branding: { logoUrl: null, tagline: '40 years of Sharma' }, shortCode: 'SHAGAL', createdAt: daysAgo(6) },
+  { id: 'evt-sun-3', organizationId: 'org-sunset', name: 'Mehendi Sangeet — Oberoi Estate', clientName: 'Priyanka Menon', location: 'Oberoi Estate, Faridabad', startDate: daysAgo(34, 17), endDate: daysAgo(34, 23), paused: false, templateIds: ['tpl-46-duo'], filters: ['warm', 'soft'], digitalCopy: true, branding: { logoUrl: null, tagline: '' }, shortCode: 'MENGEN', createdAt: daysAgo(40) },
+  { id: 'evt-kade-1', organizationId: 'org-kade', name: 'Birthday Bash — Ananya 5', clientName: 'The Malhotra Family', location: 'Green Park, Delhi', startDate: daysAgo(0, 16), endDate: daysAgo(0, 22), paused: false, templateIds: ['tpl-46-duo', 'tpl-wide-grid4'], filters: ['party', 'soft'], digitalCopy: true, branding: { logoUrl: null, tagline: 'Ananya turns 5!' }, shortCode: 'ANABAS', createdAt: daysAgo(9) },
+  { id: 'evt-pika-1', organizationId: 'org-pika', name: 'Pika Studio Grand Launch', clientName: 'Pika Photography', location: 'Andheri West, Mumbai', startDate: D('2026-09-22T11:00:00+05:30'), endDate: D('2026-09-26T21:00:00+05:30'), paused: false, templateIds: ['tpl-46-duo', 'tpl-strip-3'], filters: ['original', 'cool'], digitalCopy: true, branding: { logoUrl: logoSvg('P', '#3871C1'), tagline: 'Pika Photography' }, shortCode: 'PIKALN', createdAt: daysAgo(11) },
+  { id: 'evt-pika-2', organizationId: 'org-pika', name: 'Corporate Offsite — Nexus Ltd', clientName: 'Nexus Ltd', location: 'Bandra Kurla, Mumbai', startDate: daysAhead(25, 10), endDate: daysAhead(25, 19), paused: false, templateIds: ['tpl-square-4', 'tpl-wide-strip2'], filters: ['original', 'cool', 'bw'], digitalCopy: false, branding: { logoUrl: null, tagline: 'Nexus Ltd' }, shortCode: 'NEXCOR', createdAt: daysAgo(3) },
+  { id: 'evt-tech-1', organizationId: 'org-tech', name: 'Gaming Zone Pop-up', clientName: 'Nexplay Arena', location: 'Select Citywalk, Gurugram', startDate: daysAgo(0, 15), endDate: daysAgo(0, 23), paused: false, templateIds: ['tpl-wide-grid4'], filters: ['neon', 'cool'], digitalCopy: true, branding: { logoUrl: null, tagline: 'GZ × Nexplay' }, shortCode: 'GZPOP', createdAt: daysAgo(14) },
+  { id: 'evt-vish-1', organizationId: 'org-vishal', name: 'Rooftop Housewarming', clientName: 'Gupta Residence', location: 'Model Town, Ludhiana', startDate: daysAgo(0, 19), endDate: daysAgo(0, 23), paused: false, templateIds: ['tpl-46-duo'], filters: ['warm'], digitalCopy: true, branding: { logoUrl: null, tagline: '' }, shortCode: 'ROOFHW', createdAt: daysAgo(2) },
+  { id: 'evt-nova-1', organizationId: 'org-nova', name: 'Diwali Pre-Preview', clientName: 'Nova Occasions', location: 'Park Street, Kolkata', startDate: daysAgo(0, 17), endDate: daysAgo(0, 22), paused: false, templateIds: ['tpl-strip-3', 'tpl-46-duo'], filters: ['warm', 'party'], digitalCopy: true, branding: { logoUrl: null, tagline: 'Diwali 2026' }, shortCode: 'NOVAPV', createdAt: daysAgo(4) },
+  { id: 'evt-alpha-1', organizationId: 'org-alpha', name: 'Jaipur Food Fest', clientName: 'Raj Food Fest', location: 'C-Scheme, Jaipur', startDate: daysAgo(20, 10), endDate: daysAgo(17, 22), paused: false, templateIds: ['tpl-wide-grid4'], filters: ['original', 'warm'], digitalCopy: true, branding: { logoUrl: null, tagline: '' }, shortCode: 'JFFST', createdAt: daysAgo(26) },
+  { id: 'evt-tech-2', organizationId: 'org-tech', name: 'Startup Meetup Booth', clientName: 'D11 Labs', location: 'Pitampura, Delhi', startDate: daysAgo(12, 18), endDate: daysAgo(12, 23), paused: false, templateIds: ['tpl-wide-strip2'], filters: ['cool'], digitalCopy: false, branding: { logoUrl: null, tagline: 'D11' }, shortCode: 'SMBTH', createdAt: daysAgo(16) },
+  { id: 'evt-riya-1', organizationId: 'org-riya', name: "Kajri's 30th", clientName: 'Kajri Ahuja', location: 'Rajpur Road, Dehradun', startDate: daysAgo(16, 19), endDate: daysAgo(16, 23, 30), paused: false, templateIds: ['tpl-46-duo'], filters: ['party', 'soft'], digitalCopy: true, branding: { logoUrl: null, tagline: 'Kajri @ 30' }, shortCode: 'K30TH', createdAt: daysAgo(21) },
+]
+
+// ---------------- Organisation defaults (the single org config doc) ----------------
+// Frames: the org admin sets each frame's price and whether it is
+// available at the booths. Emerald Luxe & Mono Studio are disabled
+// everywhere in the seed (so the Owner can demo frame removal).
+function defaultFramesFor(orgId, overrides = {}) {
+  return FRAME_CATALOGUE.map((f) => {
+    const o = overrides[f.id] || {}
+    return { frameId: f.id, price: o.price ?? f.defaultPrice, allowed: o.allowed ?? (f.id !== 'frame-emerald' && f.id !== 'frame-mono') }
+  })
+}
+const ORG_DEFAULTS = {
+  'org-sunset': { name: 'Sunset Weddings', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-sunset', { 'frame-royal': { price: 75 }, 'frame-gold': { price: 90 }, 'frame-maroon': { price: 60 }, 'frame-neon': { price: 75 } }) },
+  'org-kade': { name: 'Kade Events', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-kade', { 'frame-pastel': { price: 35, allowed: true } }) },
+  'org-pika': { name: 'Pika Photography', logoUrl: null, boothTimeoutSec: 480, frames: defaultFramesFor('org-pika', { 'frame-neon': { price: 60 }, 'frame-gold': { price: 70 } }) },
+  'org-tech': { name: 'Tech Closet', logoUrl: null, boothTimeoutSec: 300, frames: defaultFramesFor('org-tech', { 'frame-neon': { price: 80 }, 'frame-mono': { allowed: true, price: 55 } }) },
+  'org-vishal': { name: 'Vishal Studio', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-vishal') },
+  'org-alpha': { name: 'Alpha Booths', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-alpha') },
+  'org-riya': { name: 'Riya Celebrations', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-riya') },
+  'org-glow': { name: 'Glow Party Co', logoUrl: null, boothTimeoutSec: 600, frames: defaultFramesFor('org-glow') },
+  'org-nova': { name: 'Nova Occasions', logoUrl: null, boothTimeoutSec: 480, frames: defaultFramesFor('org-nova', { 'frame-blush': { price: 40, allowed: true } }) },
+}
+
+// ---------------- Coupons (organisation-owned) ----------------
+const COUPONS = [
+  { id: 'cup-sun-1', organizationId: 'org-sunset', code: 'WEDDING20', type: 'percentage', value: 20, quantity: 200, usedCount: 164, expiryDate: D('2026-12-31T23:59:00+05:30'), eventIds: ['evt-sun-1'], status: 'active', createdAt: daysAgo(18), updatedAt: daysAgo(18) },
+  { id: 'cup-sun-2', organizationId: 'org-sunset', code: 'VIP50', type: 'percentage', value: 50, quantity: 10, usedCount: 10, expiryDate: D('2026-09-30T23:59:00+05:30'), eventIds: ['evt-sun-1'], status: 'active', createdAt: daysAgo(20), updatedAt: daysAgo(2) },
+  { id: 'cup-kade-1', organizationId: 'org-kade', code: 'BIRTHDAY50', type: 'fixed', value: 50, quantity: 25, usedCount: 7, expiryDate: D('2026-10-15T23:59:00+05:30'), eventIds: ['evt-kade-1'], status: 'active', createdAt: daysAgo(8), updatedAt: daysAgo(8) },
+  { id: 'cup-pika-1', organizationId: 'org-pika', code: 'LAUNCH30', type: 'percentage', value: 30, quantity: 500, usedCount: 231, expiryDate: D('2026-09-26T23:59:00+05:30'), eventIds: ['evt-pika-1'], status: 'active', createdAt: daysAgo(11), updatedAt: daysAgo(11) },
+  { id: 'cup-pika-2', organizationId: 'org-pika', code: 'CORPOFF100', type: 'fixed', value: 100, quantity: 40, usedCount: 0, expiryDate: D('2026-10-31T23:59:00+05:30'), eventIds: ['evt-pika-2'], status: 'paused', createdAt: daysAgo(3), updatedAt: daysAgo(1) },
+  { id: 'cup-tech-1', organizationId: 'org-tech', code: 'GZFLASH15', type: 'percentage', value: 15, quantity: 300, usedCount: 300, expiryDate: D('2026-09-30T23:59:00+05:30'), eventIds: ['evt-tech-1'], status: 'active', createdAt: daysAgo(13), updatedAt: daysAgo(0, 20) },
+  { id: 'cup-nova-1', organizationId: 'org-nova', code: 'NOVA10', type: 'percentage', value: 10, quantity: 100, usedCount: 12, expiryDate: D('2026-09-30T23:59:00+05:30'), eventIds: ['evt-nova-1'], status: 'active', createdAt: daysAgo(4), updatedAt: daysAgo(4) },
+]
+
+// ---------------- Support tickets (guest issues, org-scoped) ----------------
+const TICKETS = [
+  {
+    id: 'tix-1', organizationId: 'org-sunset', eventId: 'evt-sun-1', deviceId: 'dev-sun-2',
+    subject: 'Printer jammed during wedding — prints stuck',
+    category: 'device', priority: 'urgent', status: 'in_progress',
+    guest: { name: 'Reception staff', contact: '+91 98210 44321' },
+    createdAt: daysAgo(0, 9, 40), updatedAt: daysAgo(0, 10, 5),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(0, 9, 40), text: 'The lawn booth printer is jammed. Couple wants their strip printed for the pheras. Please help!' },
+      { id: 'm2', author: 'Rohit Das (Organisation Manager)', at: daysAgo(0, 10, 5), text: 'Rohit here — I have asked the booth operator to power-cycle the printer. If it fails in 5 minutes we will switch to Booth 01 with a manual print queue.' },
+    ],
+    resolution: null,
+  },
+  {
+    id: 'tix-2', organizationId: 'org-sunset', eventId: 'evt-sun-1', deviceId: null,
+    subject: 'Guest could not download photos after paying',
+    category: 'payment', priority: 'high', status: 'open',
+    guest: { name: 'Ankit (guest)', contact: 'ankit.g@gmail.com' },
+    createdAt: daysAgo(0, 11, 5), updatedAt: daysAgo(0, 11, 5),
+    messages: [
+      { id: 'm1', author: 'Guest (download page)', at: daysAgo(0, 11, 5), text: 'I paid for 1 print + digital copy. The download link shows “token expired”. UTR: 417220983312.' },
+    ],
+    resolution: null,
+  },
+  {
+    id: 'tix-3', organizationId: 'org-pika', eventId: 'evt-pika-1', deviceId: 'dev-pika-1',
+    subject: 'Camera focus issues in low light',
+    category: 'device', priority: 'medium', status: 'open',
+    guest: { name: 'Venue manager', contact: '+91 99870 11234' },
+    createdAt: daysAgo(1, 15, 20), updatedAt: daysAgo(1, 15, 20),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(1, 15, 20), text: 'Indoor shots are coming out blurry when the hall lights are dim. Outdoor shots are fine.' },
+    ],
+    resolution: null,
+  },
+  {
+    id: 'tix-4', organizationId: 'org-tech', eventId: 'evt-tech-1', deviceId: 'dev-tech-1',
+    subject: 'Coupon GZFLASH15 not applying',
+    category: 'payment', priority: 'high', status: 'in_progress',
+    guest: { name: 'Walk-in guest', contact: null },
+    createdAt: daysAgo(0, 18, 30), updatedAt: daysAgo(0, 20, 10),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(0, 18, 30), text: 'Poster at the venue says use GZFLASH15 for 15% off, but the booth says coupon exhausted.' },
+      { id: 'm2', author: 'Vikram Sethi (Organisation Admin)', at: daysAgo(0, 20, 10), text: 'Coupon is fully used (300/300). Venue staff should take it off posters. I am creating a fresh 100-quantity batch for tomorrow.' },
+    ],
+    resolution: null,
+  },
+  {
+    id: 'tix-5', organizationId: 'org-kade', eventId: 'evt-kade-1', deviceId: null,
+    subject: 'Wrong name on printed strip',
+    category: 'photo', priority: 'low', status: 'resolved',
+    guest: { name: 'Mrs Malhotra', contact: '+91 98100 90807' },
+    createdAt: daysAgo(2, 17, 45), updatedAt: daysAgo(2, 19, 0),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(2, 17, 45), text: 'Our kid’s name was spelled wrong on the frame ("Anaya" instead of "Ananya").' },
+      { id: 'm2', author: 'Kunal Aneja (Organisation Admin)', at: daysAgo(2, 19, 0), text: 'Re-printed with the correct spelling and shared the digital copy on WhatsApp. Apologised on our behalf.' },
+    ],
+    resolution: 'Correct name applied to event branding; reprint issued to guest.',
+  },
+  {
+    id: 'tix-6', organizationId: 'org-vishal', eventId: 'evt-vish-1', deviceId: 'dev-vish-1',
+    subject: 'Booth shows “no event assigned”',
+    category: 'event', priority: 'urgent', status: 'open',
+    guest: { name: 'Host', contact: '+91 98155 66778' },
+    createdAt: daysAgo(0, 19, 10), updatedAt: daysAgo(0, 19, 10),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(0, 19, 10), text: 'Booth is on but the screen says no event assigned. The party is about to start!' },
+    ],
+    resolution: null,
+  },
+  {
+    id: 'tix-7', organizationId: 'org-pika', eventId: 'evt-pika-2', deviceId: null,
+    subject: 'Corporate client wants invoice copy',
+    category: 'general', priority: 'low', status: 'closed',
+    guest: { name: 'Nexus Ltd accounts', contact: 'accounts@nexus.co.in' },
+    createdAt: daysAgo(5, 12, 0), updatedAt: daysAgo(4, 10, 30),
+    messages: [
+      { id: 'm1', author: 'Guest (download page)', at: daysAgo(5, 12, 0), text: 'Please share invoice for the event package for our expenses.' },
+      { id: 'm2', author: 'Arpita Shah (Organisation Admin)', at: daysAgo(4, 10, 30), text: 'Invoice HAP-EVT-2609-0342 shared to their email. Closing.' },
+    ],
+    resolution: 'Invoice shared with client accounts team.',
+  },
+  {
+    id: 'tix-8', organizationId: 'org-nova', eventId: 'evt-nova-1', deviceId: 'dev-nova-1',
+    subject: 'UPI QR not scanning on old phones',
+    category: 'payment', priority: 'medium', status: 'open',
+    guest: { name: 'Guest', contact: null },
+    createdAt: daysAgo(0, 18, 2), updatedAt: daysAgo(0, 18, 2),
+    messages: [
+      { id: 'm1', author: 'Guest (booth widget)', at: daysAgo(0, 18, 2), text: 'QR scan fails on two older Android phones; they could pay with card instead.' },
+    ],
+    resolution: null,
+  },
+]
+
+// ---------------- Audit logs ----------------
+let AUDIT_SEQ = 0
+const A = (at, actorId, action, entity, summary, ip, severity = 'info') => ({
+  id: `aud-${++AUDIT_SEQ}`,
+  at: at || daysAgo(0, 9, 0),
+  actorId,
+  action,
+  entity,
+  summary,
+  ip: ip || '103.89.20.11',
+  severity,
+  organizationId: null,
+})
+
+const AUDIT = [
+  A(daysAgo(0, 8, 12), 'usr-owner', 'platform.auth.login', 'user', 'Owner Harshit Mehta signed in to CRM', '103.89.20.11'),
+  A(daysAgo(0, 9, 4), 'usr-pa', 'platform.auth.login', 'user', 'Platform Admin Priya Nair signed in to CRM', '152.58.99.4'),
+  A(daysAgo(0, 10, 2), 'usr-sana', 'organisation.auth.login', 'user', 'Sana Kapoor signed in (Sunset Weddings)', '49.36.101.77', 'info', 'org-sunset'),
+  A(daysAgo(0, 10, 41), 'usr-vikram', 'organisation.auth.login', 'user', 'Vikram Sethi signed in (Tech Closet)', '182.64.220.9', 'info', 'org-tech'),
+  A(daysAgo(1, 12, 40), 'usr-kade-admin-op', 'device.registered', 'device', 'Device registered: KADE Main Booth (Rohini, Delhi)', '182.64.19.101', 'info', 'org-kade'),
+  A(daysAgo(1, 16, 20), 'usr-rohit', 'event.assigned_to_device', 'event', 'Event “Kapoor–Verma Wedding” assigned to Booth 02 — Lawn', '49.36.101.77', 'info', 'org-sunset'),
+  A(daysAgo(1, 18, 5), 'usr-arpita', 'coupon.created', 'coupon', 'Coupon LAUNCH30 created (30% off, 500 uses)', '117.96.11.30', 'info', 'org-pika'),
+  A(daysAgo(2, 11, 30), 'usr-pa', 'platform.template.updated', 'template', 'Global template “Neon Party” updated (preview + layout)', '152.58.99.4'),
+  A(daysAgo(2, 14, 45), 'usr-meera', 'event.created', 'event', 'Event “Startup Meetup Booth” created', '182.64.220.9', 'info', 'org-tech'),
+  A(daysAgo(3, 10, 15), 'usr-owner', 'platform.template.created', 'template', 'Global template “Kids Fun 4x6” created (Celebrations)', '103.89.20.11'),
+  A(daysAgo(3, 12, 40), 'usr-nandini', 'organisation.auth.login', 'user', 'Nandini Bose signed in (Nova Occasions)', '106.51.77.2', 'info', 'org-nova'),
+  A(daysAgo(4, 17, 25), 'usr-sana', 'ticket.resolved', 'ticket', 'Ticket “Wrong name on printed strip” resolved', '49.36.101.77', 'info', 'org-kade'),
+  A(daysAgo(5, 13, 10), 'usr-owner', 'platform.user.created', 'user', 'Internal user Arjun Rao created (Support Manager)', '103.89.20.11'),
+  A(daysAgo(5, 15, 30), 'usr-arpita', 'organisation.team.created', 'user', 'Organisation Manager seat reserved (pending invite)', '117.96.11.30', 'info', 'org-pika'),
+  A(daysAgo(6, 11, 0), 'usr-owner', 'platform.auth.failed', 'auth', 'Failed login attempt for unknown email “admin@happypix.com” (3 tries)', '45.120.148.9', 'warn'),
+  A(daysAgo(8, 9, 50), 'usr-vikram', 'device.registered', 'device', 'Device registered: TechCloset iPad (Pitampura, Delhi)', '182.64.220.9', 'info', 'org-tech'),
+  A(daysAgo(8, 14, 20), 'usr-owner', 'platform.organisation.created', 'organisation', 'Organisation “Nova Occasions” created (Trial, 14 days)', '103.89.20.11'),
+  A(daysAgo(10, 10, 30), 'usr-owner', 'platform.plan.purchased', 'subscription', 'Vishal Studio purchased Starter (3 months, ₹1,999) — invoice HAP-INV-2609-401', '103.89.20.11'),
+  A(daysAgo(10, 18, 45), 'usr-sana', 'organisation.defaults.updated', 'organisation', 'Frame prices updated (Royal Black ₹60 → ₹75, Gold Elegance ₹80 → ₹90)', '49.36.101.77', 'info', 'org-sunset'),
+  A(daysAgo(13, 12, 0), 'usr-owner', 'platform.organisation.suspended', 'organisation', 'Organisation “Riya Celebrations” suspended — repeated billing disputes', '103.89.20.11', 'warn'),
+  A(daysAgo(14, 9, 30), 'usr-owner', 'platform.template.disabled', 'template', 'Global template “Kids Fun 4x6” disabled (layout rework)', '103.89.20.11'),
+  A(daysAgo(16, 15, 10), 'usr-kade-admin-op', 'coupon.created', 'coupon', 'Coupon BIRTHDAY50 created (₹50 off, 25 uses)', '182.64.19.101', 'info', 'org-kade'),
+  A(daysAgo(19, 11, 40), 'usr-owner', 'platform.plan.expiring', 'subscription', 'Pika Photography Professional plan expires in 11 days — renewal reminder queued', '103.89.20.11', 'warn'),
+  A(daysAgo(20, 17, 5), 'usr-owner', 'platform.plan.purchased', 'subscription', 'Kade Events purchased Starter (3 months, ₹1,999) — invoice HAP-INV-2608-342', '103.89.20.11'),
+  A(daysAgo(21, 10, 20), 'usr-rohit', 'event.paused', 'event', 'Event “Sharma Anniversary Gala” paused (venue reschedule request)', '49.36.101.77', 'info', 'org-sunset'),
+  A(daysAgo(21, 16, 0), 'usr-rohit', 'event.resumed', 'event', 'Event “Sharma Anniversary Gala” resumed with new venue', '49.36.101.77', 'info', 'org-sunset'),
+  A(daysAgo(24, 13, 15), 'usr-pa', 'platform.organisation.viewed', 'organisation', 'Platform Admin viewed organisation “Alpha Booths”', '152.58.99.4', 'info'),
+  A(daysAgo(30, 9, 0), 'usr-owner', 'platform.organisation.banned', 'organisation', 'Organisation “Glow Party Co” banned — fraudulent coupon abuse', '103.89.20.11', 'danger'),
+  A(daysAgo(34, 12, 30), 'usr-owner', 'platform.template.created', 'template', 'Global template “Square Grid 4” created (Corporate)', '103.89.20.11'),
+  A(daysAgo(40, 15, 45), 'usr-arpita', 'device.registered', 'device', 'Device registered: Pika Corporate (Bandra, Mumbai)', '117.96.11.30', 'info', 'org-pika'),
+  A(daysAgo(42, 19, 10), 'usr-owner', 'platform.plan.expired', 'subscription', 'Alpha Booths Basic plan expired — organisation moved to expired state', '103.89.20.11', 'warn'),
+]
+
+// ---------------- Payments (booth print revenue per org) ----------------
+function buildPayments() {
+  const rng = mulberry32(20260924)
+  const out = []
+  const spec = [
+    { org: 'org-sunset', w: 1.0, devices: ['dev-sun-1', 'dev-sun-2', 'dev-sun-3', 'dev-sun-4'], events: ['evt-sun-1', 'evt-sun-3'] },
+    { org: 'org-pika', w: 0.85, devices: ['dev-pika-1', 'dev-pika-2', 'dev-pika-3'], events: ['evt-pika-1'] },
+    { org: 'org-tech', w: 0.7, devices: ['dev-tech-1', 'dev-tech-2'], events: ['evt-tech-1', 'evt-tech-2'] },
+    { org: 'org-kade', w: 0.5, devices: ['dev-kade-1'], events: ['evt-kade-1'] },
+    { org: 'org-nova', w: 0.35, devices: ['dev-nova-1'], events: ['evt-nova-1'] },
+    { org: 'org-vishal', w: 0.3, devices: ['dev-vish-1'], events: ['evt-vish-1'] },
+    { org: 'org-alpha', w: 0.25, devices: ['dev-alpha-1'], events: ['evt-alpha-1'] },
+    { org: 'org-riya', w: 0.15, devices: ['dev-riya-1'], events: ['evt-riya-1'] },
+  ]
+  // base print revenue per org (what their guests paid for prints)
+  const base = { 'org-sunset': 120, 'org-pika': 90, 'org-tech': 80, 'org-kade': 100, 'org-nova': 100, 'org-vishal': 100, 'org-alpha': 100, 'org-riya': 100 }
+  let seq = 1
+  const start = new Date('2026-01-06T00:00:00+05:30').getTime()
+  const end = new Date('2026-09-24T09:00:00+05:30').getTime()
+  for (let t = start; t < end; t += 3600000 * (6 + Math.floor(rng() * 20))) {
+    let pick = rng()
+    let total = spec.reduce((s, x) => s + x.w, 0)
+    for (const s of spec) {
+      pick -= s.w / total
+      if (pick <= 0) {
+        const count = 1 + (rng() < 0.3 ? 1 : 0)
+        for (let k = 0; k < count; k++) {
+          const prints = 1 + Math.floor(rng() * 3)
+          const frameFee = rng() < 0.4 ? [0, 50, 60, 75][Math.floor(rng() * 4)] : 0
+          const amt = (base[s.org] + frameFee) * prints
+          const roll = rng()
+          const status = roll < 0.9 ? 'paid' : roll < 0.955 ? 'pending' : 'failed'
+          const dt = new Date(t + Math.floor(rng() * 3600000))
+          out.push({
+            id: `pay-${seq++}`,
+            organizationId: s.org,
+            eventId: rng() < 0.92 ? s.events[Math.floor(rng() * s.events.length)] : null,
+            deviceId: s.devices[Math.floor(rng() * s.devices.length)],
+            amount: amt,
+            printCount: prints,
+            digitalCopy: rng() < 0.55,
+            status,
+            utr: status === 'paid' ? `417${String(100000000 + Math.floor(rng() * 899999999)).slice(0, 9)}` : null,
+            createdAt: dt.toISOString(),
+          })
+        }
+        break
+      }
+    }
+  }
+  return out
+}
+
+// ---------------- Build / persist ----------------
+function seedDb() {
+  return {
+    version: DB_VERSION,
+    seededAt: D('2026-09-24T00:00:00+05:30'),
+    templates: TEMPLATES,
+    frames: FRAME_CATALOGUE.map((f) => ({ ...f })),
+    users: USERS,
+    organisations: ORGS,
+    subscriptions: SUBSCRIPTIONS,
+    devices: DEVICES,
+    events: EVENTS,
+    orgDefaults: ORG_DEFAULTS,
+    coupons: COUPONS,
+    tickets: TICKETS,
+    payments: buildPayments(),
+    audit: AUDIT,
+  }
+}
+
+let _db = null
+
+export function getDb() {
+  if (_db) return _db
+  try {
+    const raw = localStorage.getItem(DB_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && parsed.version === DB_VERSION) {
+        _db = parsed
+        return _db
+      }
+    }
+  } catch { /* fall through to reseed */ }
+  _db = seedDb()
+  persist()
+  return _db
+}
+
+export function persist() {
+  if (!_db) return
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(_db))
+  } catch { /* storage full — keep in-memory copy */ }
+}
+
+export function resetDb() {
+  _db = null
+  try { localStorage.removeItem(DB_KEY) } catch { /* ignore */ }
+  return getDb()
+}

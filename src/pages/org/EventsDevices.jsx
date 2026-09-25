@@ -1,0 +1,663 @@
+// Events & Devices (org screen).
+//
+// Event creation/updates ask exactly four things — no price, no passkey:
+//   1. General       — event name, client/host, location, start, end,
+//                      digital-copy toggle
+//   2. Customisation — photo filters (from the available options) +
+//                      templates (from all available platform templates)
+//   3. Branding      — client logo (default: none; may be added to the
+//                      print footer) + default tagline (editable later)
+//
+// Print pricing lives only in Organisation Defaults (per frame, set by the
+// org admin). Booth guest access is handled by the booth app, not a
+// CRM-entered passkey.
+
+import { useEffect, useMemo, useState, useCallback } from 'react'
+import { api } from '../../api/index.js'
+import { useApp } from '../../context/AppContext.jsx'
+import {
+  Card, Tabs, Chip, PageLoader, SearchInput, Button, Modal, Field, TextInput,
+  Select, ConfirmDialog, EmptyState, WarnBanner, Toggle,
+} from '../../components/ui.jsx'
+import { Icon } from '../../lib/icons.jsx'
+import { dateShort, dateMed, relativeTime, uuidShort } from '../../lib/format.js'
+import { FILTERS, EVENT_STATUSES } from '../../lib/plans.js'
+import { FRAME_BY_ID } from '../../lib/frames.js'
+import { templateSlotsLabel } from '../../lib/templates.js'
+import { ROLES } from '../../lib/roles.js'
+import FramePreview from '../../components/FramePreview.jsx'
+
+const statusChip = (s) => EVENT_STATUSES[s] || EVENT_STATUSES.upcoming
+
+export default function EventsDevices() {
+  const { user, toast } = useApp()
+  const isAdmin = user.role === ROLES.ORG_ADMIN
+  const [tab, setTab] = useState('events')
+  const [events, setEvents] = useState(null)
+  const [devices, setDevices] = useState(null)
+  const [templates, setTemplates] = useState(null)
+  const [defaults, setDefaults] = useState(null)
+  const [search, setSearch] = useState('')
+  const [eventFilter, setEventFilter] = useState('')
+  const [editor, setEditor] = useState(null) // 'new' | event
+  const [deleting, setDeleting] = useState(null)
+  const [removingDevice, setRemovingDevice] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  const load = useCallback(() => {
+    api.org.events().then((r) => setEvents(r)).catch((e) => toast(e.message, 'error'))
+    api.org.devices().then((r) => setDevices(r)).catch(() => {})
+    api.platform.templates().then((r) => setTemplates(r.templates.filter((t) => t.active))).catch(() => {})
+    api.org.defaults().then(setDefaults).catch(() => {})
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const filteredEvents = useMemo(() => {
+    if (!events) return []
+    let r = events.events
+    if (eventFilter) r = r.filter((e) => e.status === eventFilter)
+    if (search) {
+      const s = search.toLowerCase()
+      r = r.filter((e) => e.name.toLowerCase().includes(s) || (e.location || '').toLowerCase().includes(s) || (e.clientName || '').toLowerCase().includes(s))
+    }
+    return r
+  }, [events, eventFilter, search])
+
+  const assignments = useMemo(() => {
+    if (!devices) return []
+    return devices.devices.map((d) => ({
+      device: d,
+      event: d.assignedEvent ? d.assignedEvent : null,
+    }))
+  }, [devices])
+
+  const doAssign = async (device, eventId) => {
+    try {
+      if (eventId) await api.org.assignDevice(device.id, eventId)
+      else await api.org.unassignDevice(device.id)
+      toast(eventId ? 'Event assigned — booth picks it up on next sync' : 'Assignment removed')
+      load()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  const pauseResume = async (ev) => {
+    try {
+      if (ev.status === 'paused') await api.org.resumeEvent(ev.id)
+      else await api.org.pauseEvent(ev.id)
+      toast(ev.status === 'paused' ? `Resumed “${ev.name}”` : `Paused “${ev.name}”`, 'info')
+      load()
+    } catch (e) {
+      toast(e.message, 'error')
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!deleting) return
+    setBusy(true)
+    try {
+      await api.org.deleteEvent(deleting.id)
+      toast(`Deleted “${deleting.name}”`)
+      setDeleting(null)
+      load()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmRemoveDevice = async () => {
+    if (!removingDevice) return
+    setBusy(true)
+    try {
+      await api.org.removeDevice(removingDevice.id)
+      toast(`Removed ${removingDevice.deviceName}`)
+      setRemovingDevice(null)
+      load()
+    } catch (e) {
+      toast(e.message, 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const assignableEvents = useMemo(
+    () => (events ? events.events.filter((e) => e.status === 'active' || e.status === 'upcoming') : []),
+    [events]
+  )
+
+  return (
+    <div>
+      <div className="page-head">
+        <div>
+          <div className="page-title">Events & Devices</div>
+          <div className="page-sub">Create events (general details, customisation and branding — never a price), register booths, and assign events to devices.</div>
+        </div>
+        {isAdmin || user.role === ROLES.ORG_MANAGER ? (
+          <Button variant="primary" icon="plus" onClick={() => setEditor('new')} disabled={!!events && !events.canCreate}>
+            Create event
+          </Button>
+        ) : null}
+      </div>
+
+      {events && !events.canCreate && (
+        <div style={{ marginBottom: 14 }}>
+          <WarnBanner tone="warn" icon="alert">
+            You cannot create a new active event right now — plan limit reached or plan inactive.
+            Finished events don't count against the limit.
+          </WarnBanner>
+        </div>
+      )}
+
+      <Tabs
+        tabs={[
+          { id: 'events', label: 'Events', icon: 'calendar', count: events?.events.length },
+          { id: 'devices', label: 'Devices', icon: 'monitor', count: devices?.devices.length },
+          { id: 'assign', label: 'Assignments', icon: 'link', count: assignments.filter((a) => a.event).length },
+        ]}
+        active={tab}
+        onChange={setTab}
+      />
+
+      <Card className="mt-16" style={{ paddingTop: 0 }}>
+        {tab === 'events' && (
+          <div>
+            <div className="row wrap gap-12" style={{ padding: '14px 16px', borderBottom: '1px solid var(--line-soft)' }}>
+              <SearchInput value={search} onChange={setSearch} placeholder="Search events…" style={{ width: 250 }} />
+              <Select value={eventFilter} onChange={(e) => setEventFilter(e.target.value)} style={{ width: 140, height: 36 }}>
+                <option value="">All statuses</option>
+                {Object.entries(EVENT_STATUSES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+              </Select>
+            </div>
+            {!events ? (
+              <PageLoader />
+            ) : filteredEvents.length === 0 ? (
+              <EmptyState icon="calendar" title="No events" message="Create your first event — pick filters, platform templates and the client's branding." action={<Button variant="primary" icon="plus" onClick={() => setEditor('new')}>Create event</Button>} />
+            ) : (
+              <div className="table-wrap">
+                <table className="hp-table">
+                  <thead>
+                    <tr>
+                      <th>Event</th>
+                      <th>Schedule</th>
+                      <th>Status</th>
+                      <th>Customisation</th>
+                      <th>Digital</th>
+                      <th className="t-right">Devices</th>
+                      <th className="t-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEvents.map((e) => {
+                      const sm = statusChip(e.status)
+                      const tpls = (e.templateIds || []).map((id) => templates?.find((t) => t.id === id)).filter(Boolean)
+                      return (
+                        <tr key={e.id}>
+                          <td>
+                            <div className="cell-main">{e.name}</div>
+                            <div className="cell-sub">{e.clientName || '—'} · {e.location || '—'}</div>
+                          </td>
+                          <td>
+                            <div className="t13">{dateMed(e.startDate)}</div>
+                            <div className="t11 faint">to {dateShort(e.endDate)}</div>
+                          </td>
+                          <td><Chip tone={sm.chip.replace('chip-', '')} dot>{sm.label}</Chip></td>
+                          <td>
+                            <div className="row wrap gap-6" style={{ maxWidth: 260 }}>
+                              {(e.filters || []).slice(0, 2).map((f) => (
+                                <Chip key={f} tone="info">{FILTERS.find((x) => x.id === f)?.label || f}</Chip>
+                              ))}
+                              {(e.filters || []).length > 2 ? <span className="t11 faint">+{(e.filters || []).length - 2}</span> : null}
+                              {tpls.length > 0 ? (
+                                <span className="t11 muted" title={tpls.map((t) => t.name).join(', ')}>
+                                  <Icon name="template" size={12} style={{ verticalAlign: '-1px', marginRight: 3 }} />
+                                  {tpls.length} template{tpls.length > 1 ? 's' : ''}
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td>
+                            {e.digitalCopy
+                              ? <Chip tone="active">Enabled</Chip>
+                              : <Chip tone="neutral">Off</Chip>}
+                          </td>
+                          <td className="t-right">
+                            {e.assignedDevices.length > 0 ? (
+                              <div className="row gap-8" style={{ justifyContent: 'flex-end' }}>
+                                {e.assignedDevices.slice(0, 3).map((d) => (
+                                  <span key={d.id} className="row gap-8" title={d.name}>
+                                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: d.online ? 'var(--hp-green)' : 'var(--faint)', flex: 'none' }} />
+                                    <span className="t12 ellipsis" style={{ maxWidth: 90 }}>{d.name}</span>
+                                  </span>
+                                ))}
+                                {e.assignedDevices.length > 3 ? <span className="t11 faint">+{e.assignedDevices.length - 3}</span> : null}
+                              </div>
+                            ) : (
+                              <span className="t12 faint">None</span>
+                            )}
+                          </td>
+                          <td className="t-right">
+                            <div className="row gap-8" style={{ justifyContent: 'flex-end' }}>
+                              <Button size="sm" variant="ghost" onClick={() => setEditor(e)} title="Edit event"><Icon name="edit" size={14} /></Button>
+                              {e.status !== 'finished' ? (
+                                <Button size="sm" variant="ghost" icon={e.status === 'paused' ? 'play' : 'pause'} onClick={() => pauseResume(e)} title={e.status === 'paused' ? 'Resume' : 'Pause'} />
+                              ) : null}
+                              {e.status !== 'active' ? (
+                                <Button size="sm" variant="ghost" icon="trash" style={{ color: 'var(--danger)' }} onClick={() => setDeleting(e)} title="Delete event" />
+                              ) : null}
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === 'devices' && (
+          <div>
+            {!devices ? (
+              <PageLoader />
+            ) : devices.devices.length === 0 ? (
+              <EmptyState
+                icon="monitor"
+                title="No devices yet"
+                message="When a booth app signs in with your HappyPix account, it pairs automatically and appears here with its own UUID. No manual tokens."
+              />
+            ) : (
+              <div className="table-wrap">
+                <table className="hp-table">
+                  <thead>
+                    <tr>
+                      <th>Device</th>
+                      <th>UUID</th>
+                      <th>Hardware</th>
+                      <th>Status</th>
+                      <th>Last seen</th>
+                      <th>Assigned event</th>
+                      <th>Registered</th>
+                      <th className="t-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {devices.devices.map((d) => (
+                      <tr key={d.id}>
+                        <td>
+                          <div className="cell-main">{d.deviceName}</div>
+                          <div className="cell-sub">{d.location || '—'}</div>
+                        </td>
+                        <td><code className="t11" style={{ background: 'var(--surface-2)', padding: '3px 7px', borderRadius: 5 }}>{uuidShort(d.deviceUuid)}</code></td>
+                        <td>
+                          <div className="row gap-8">
+                            {d.hardware?.includes('camera') ? <Icon name="camera" size={14} style={{ color: 'var(--muted)' }} /> : null}
+                            {d.hardware?.includes('printer') ? <Icon name="printer" size={14} style={{ color: 'var(--muted)' }} /> : null}
+                            {d.hardware?.includes('wifi') ? <Icon name="wifi" size={14} style={{ color: 'var(--muted)' }} /> : null}
+                          </div>
+                        </td>
+                        <td><Chip tone={d.online ? 'active' : 'neutral'} dot>{d.online ? 'Online' : 'Offline'}</Chip></td>
+                        <td className="t13 muted">{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'never'}</td>
+                        <td>
+                          {d.assignedEvent ? (
+                            <div className="row gap-8">
+                              <Chip tone={d.assignedEvent.status === 'active' ? 'active' : d.assignedEvent.status === 'upcoming' ? 'info' : 'warn'}>{d.assignedEvent.name}</Chip>
+                              <Button size="sm" variant="ghost" icon="x" title="Remove assignment" onClick={() => doAssign(d, null)} />
+                            </div>
+                          ) : (
+                            <span className="t12 faint">No event</span>
+                          )}
+                        </td>
+                        <td className="t13 muted">{dateShort(d.registeredAt)}</td>
+                        <td className="t-right">
+                          <Button size="sm" variant="ghost" icon="trash" style={{ color: 'var(--danger)' }} title="Remove device" onClick={() => setRemovingDevice(d)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line-soft)' }}>
+              <div className="row between t12">
+                <span className="muted">
+                  <Icon name="shield" size={13} style={{ verticalAlign: '-2px', marginRight: 5 }} />
+                  Devices pair themselves: booth app → your HappyPix login → generated UUID → appears here.
+                </span>
+                {devices ? (
+                  <span className="num fw6">{devices.limit.used} / {devices.limit.allowed} device limit</span>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {tab === 'assign' && (
+          <div>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line-soft)' }}>
+              <p className="t13 muted">
+                Assign an active or upcoming event to a device. The booth receives the assignment on its next heartbeat and starts serving that event's guests.
+              </p>
+            </div>
+            {!devices ? (
+              <PageLoader />
+            ) : (
+              <div>
+                {assignments.map(({ device, event }) => (
+                  <div key={device.id} className="row between wrap" style={{ padding: '14px 18px', borderBottom: '1px solid var(--line-soft)', gap: 12 }}>
+                    <div className="row gap-12" style={{ minWidth: 0, flex: '1 1 260px' }}>
+                      <span className="stat-ico" style={{ width: 38, height: 38, background: device.online ? 'var(--hp-green-soft)' : 'var(--surface-2)', color: device.online ? 'var(--hp-green-ink)' : 'var(--faint)' }}>
+                        <Icon name="monitor" size={17} />
+                      </span>
+                      <div style={{ minWidth: 0 }}>
+                        <div className="t13 fw6 ellipsis">{device.deviceName}</div>
+                        <div className="t11 muted">{device.location || '—'} · {device.online ? 'online' : 'offline'}</div>
+                      </div>
+                    </div>
+                    <Icon name="chevron-right" size={15} style={{ color: 'var(--faint)', flex: 'none' }} />
+                    <div style={{ flex: '1 1 280px' }}>
+                      <Select
+                        value={event ? event.id : ''}
+                        onChange={(e) => doAssign(device, e.target.value)}
+                        style={{ height: 36 }}
+                      >
+                        <option value="">— No event assigned —</option>
+                        {assignableEvents.map((ev) => (
+                          <option key={ev.id} value={ev.id}>
+                            {ev.name} ({ev.status === 'active' ? 'live' : 'upcoming'})
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  </div>
+                ))}
+                {assignments.length === 0 ? (
+                  <EmptyState icon="monitor" title="No devices" message="Register a booth first from the Devices tab." />
+                ) : null}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <EventEditor
+        key={editor === 'new' ? 'new' : editor?.id}
+        open={!!editor}
+        initial={editor === 'new' ? null : editor}
+        templates={templates || []}
+        defaults={defaults}
+        onClose={() => setEditor(null)}
+        onSaved={() => { setEditor(null); load() }}
+      />
+
+      <ConfirmDialog
+        open={!!deleting}
+        onClose={() => setDeleting(null)}
+        onConfirm={confirmDelete}
+        danger
+        loading={busy}
+        title={`Delete “${deleting?.name}”?`}
+        message="Device assignments and coupon links to this event are removed. Historical payments stay in revenue reports."
+        confirmLabel="Delete event"
+      />
+
+      <ConfirmDialog
+        open={!!removingDevice}
+        onClose={() => setRemovingDevice(null)}
+        onConfirm={confirmRemoveDevice}
+        danger
+        loading={busy}
+        title={`Remove ${removingDevice?.deviceName}?`}
+        message="The booth will be blocked from connecting. Its registration record is deleted; re-pairing creates a new UUID."
+        confirmLabel="Remove device"
+      />
+    </div>
+  )
+}
+
+// ---------------- Event editor: General / Customisation / Branding ----------------
+
+function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
+  const { toast } = useApp()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [form, setForm] = useState(() => ({
+    name: initial?.name || '',
+    clientName: initial?.clientName || '',
+    location: initial?.location || '',
+    startDate: initial ? toLocalInput(initial.startDate) : '',
+    endDate: initial ? toLocalInput(initial.endDate) : '',
+    digitalCopy: initial ? initial.digitalCopy !== false : false,
+    filters: initial?.filters || [],
+    templateIds: initial?.templateIds || [],
+    logoUrl: initial?.branding?.logoUrl || null,
+    tagline: initial?.branding?.tagline || '',
+  }))
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
+  const toggleIn = (key, id) =>
+    setForm((f) => ({ ...f, [key]: f[key].includes(id) ? f[key].filter((x) => x !== id) : [...f[key], id] }))
+
+  const onLogoFile = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const r = new FileReader()
+    r.onload = () => set('logoUrl', r.result)
+    r.readAsDataURL(file)
+  }
+
+  const save = async () => {
+    setError('')
+    if (!form.name.trim()) return setError('Event name is required.')
+    if (!form.startDate || !form.endDate) return setError('Start and end times are required.')
+    if (new Date(form.startDate) >= new Date(form.endDate)) return setError('End time must be after start time.')
+    setBusy(true)
+    try {
+      const body = {
+        name: form.name.trim(),
+        clientName: form.clientName.trim(),
+        location: form.location.trim(),
+        startDate: new Date(form.startDate).toISOString(),
+        endDate: new Date(form.endDate).toISOString(),
+        digitalCopy: form.digitalCopy,
+        filters: form.filters,
+        templateIds: form.templateIds,
+        branding: { logoUrl: form.logoUrl, tagline: form.tagline.trim() },
+      }
+      if (initial) await api.org.updateEvent(initial.id, body)
+      else await api.org.createEvent(body)
+      toast(initial ? 'Event updated' : `Event “${body.name}” created`)
+      onSaved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) return null
+
+  const allowedFrames = (defaults?.frames || []).filter((f) => f.allowed)
+  const previewTemplate = templates.find((t) => t.id === form.templateIds[0])
+  const previewFrame = FRAME_BY_ID[allowedFrames[0]?.frameId] || FRAME_BY_ID['frame-classic']
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={initial ? `Edit “${initial.name}”` : 'Create event'}
+      sub="General details, customisation and branding — there is no price here. Frame prices come from Organisation Defaults."
+      width="xwide"
+      footer={
+        <>
+          {error ? <span className="input-error" style={{ marginRight: 'auto' }}>{error}</span> : null}
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : initial ? 'Save changes' : 'Create event'}</Button>
+        </>
+      }
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 22 }}>
+        <div>
+          <SectionLabel n={1} title="General" />
+          <Field label="Event name" required>
+            <TextInput value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Kapoor–Verma Wedding" />
+          </Field>
+          <div className="row gap-12">
+            <div style={{ flex: 1 }}>
+              <Field label="Client / host">
+                <TextInput value={form.clientName} onChange={(e) => set('clientName', e.target.value)} placeholder="Who is the event for" />
+              </Field>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Field label="Location">
+                <TextInput value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="Venue, city" />
+              </Field>
+            </div>
+          </div>
+          <div className="row gap-12">
+            <div style={{ flex: 1 }}>
+              <Field label="Starts" required>
+                <TextInput type="datetime-local" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} />
+              </Field>
+            </div>
+            <div style={{ flex: 1 }}>
+              <Field label="Ends" required>
+                <TextInput type="datetime-local" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} />
+              </Field>
+            </div>
+          </div>
+          <div className="row between" style={{ padding: '10px 14px', background: 'var(--surface-2)', borderRadius: 'var(--r-sm)' }}>
+            <div>
+              <div className="t13 fw6">Digital copy</div>
+              <div className="t11 muted">Let guests receive a digital copy of their prints (download link after printing).</div>
+            </div>
+            <Toggle on={form.digitalCopy} onChange={(v) => set('digitalCopy', v)} />
+          </div>
+
+          <div className="mt-16">
+            <SectionLabel n={2} title="Customisation" />
+            <label className="label">Photo filters available at this event</label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 18 }}>
+              {FILTERS.map((f) => {
+                const sel = form.filters.includes(f.id)
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => toggleIn('filters', f.id)}
+                    className="row gap-8"
+                    style={{
+                      padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
+                      border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
+                      background: sel ? 'rgba(234,9,127,0.06)' : 'var(--surface)',
+                      color: sel ? 'var(--hp-pink-deep)' : 'var(--ink-2)',
+                    }}
+                  >
+                    <Icon name={sel ? 'check' : 'filter'} size={13} />
+                    {f.label}
+                  </button>
+                )
+              })}
+            </div>
+
+            <label className="label">Templates for this event <span className="t11 muted fw400" style={{ fontWeight: 400 }}>(from all available platform templates)</span></label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+              {templates.map((t) => {
+                const sel = form.templateIds.includes(t.id)
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => toggleIn('templateIds', t.id)}
+                    style={{
+                      position: 'relative', padding: 6, borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+                      border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
+                      background: sel ? 'rgba(234,9,127,0.06)' : 'var(--surface)',
+                    }}
+                  >
+                    <FramePreview
+                      template={t.imageScope === 'general' ? { ...t, photoSlots: [] } : t}
+                      frame={{ name: 'canvas', background: { type: 'solid', colors: ['#FFFFFF'], pattern: 'none' }, text: '#3A3344' }}
+                      width={72}
+                    />
+                    <div className="t11 fw6 mt-8 ellipsis" title={t.name}>{t.name}</div>
+                    <div className="t11 faint" style={{ fontSize: 10 }}>{t.imageScope === 'general' ? 'Universal' : templateSlotsLabel(t)}</div>
+                    {sel ? (
+                      <span style={{
+                        position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
+                        background: 'var(--hp-pink)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <Icon name="check" size={11} />
+                      </span>
+                    ) : null}
+                  </button>
+                )
+              })}
+              {templates.length === 0 ? <div className="t12 faint" style={{ gridColumn: '1/-1' }}>No active platform templates.</div> : null}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <SectionLabel n={3} title="Branding" />
+          <Field label="Client logo" hint="Default: none. If added, it appears in the 15% footer of every print.">
+            {form.logoUrl ? (
+              <div className="row gap-12" style={{ alignItems: 'center' }}>
+                <img src={form.logoUrl} alt="Logo" style={{ height: 52, borderRadius: 8, border: '1px solid var(--line)', objectFit: 'contain', background: '#fff' }} />
+                <Button size="sm" variant="ghost" icon="trash" onClick={() => set('logoUrl', null)} style={{ color: 'var(--danger)' }}>Remove</Button>
+              </div>
+            ) : (
+              <div style={{ border: '2px dashed var(--line)', borderRadius: 10, padding: 16, textAlign: 'center', cursor: 'pointer', position: 'relative', background: 'var(--surface-2)' }}>
+                <input type="file" accept="image/png, image/jpeg" onChange={onLogoFile} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
+                <Icon name="upload" size={22} style={{ color: 'var(--faint)' }} />
+                <div className="t12 muted mt-8">Click to upload a logo — or leave as none</div>
+              </div>
+            )}
+          </Field>
+          <Field label="Default tagline" hint="Shown in the print footer under/beside the logo. Editable any time from this screen.">
+            <TextInput value={form.tagline} onChange={(e) => set('tagline', e.target.value)} placeholder="e.g. Shubh Vivah — Kapoor & Verma" />
+          </Field>
+
+          <div className="mt-16">
+            <label className="label">Output preview</label>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+              <FramePreview
+                template={previewTemplate || templates[0] || null}
+                frame={previewFrame}
+                branding={{ logoUrl: form.logoUrl, tagline: form.tagline }}
+                width={150}
+              />
+              <div className="t11 muted" style={{ maxWidth: 200, lineHeight: 1.5 }}>
+                Prints this event will use: <b>{form.templateIds.length > 0 ? `${form.templateIds.length} selected template(s)` : 'the default platform template'}</b> on{' '}
+                <b>{previewFrame.name}</b> (plus {allowedFrames.length - 1 > 0 ? `the other ${allowedFrames.length - 1} booth-allowed frame(s)` : 'no other frame'}).
+                The frame's price is set in Organisation Defaults — never here.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function SectionLabel({ n, title }) {
+  return (
+    <div className="row gap-8" style={{ alignItems: 'center', marginBottom: 12 }}>
+      <span style={{
+        width: 20, height: 20, borderRadius: '50%', background: 'var(--hp-pink)', color: '#fff',
+        fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      }}>{n}</span>
+      <span className="t13 fw7">{title}</span>
+    </div>
+  )
+}
+
+function toLocalInput(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
