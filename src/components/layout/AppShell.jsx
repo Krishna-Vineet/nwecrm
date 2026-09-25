@@ -74,7 +74,7 @@ export default function AppShell({ children }) {
         <div className="sidebar-brand">
           <BrandMark size={36} onDark />
           <div className="brand-text">
-            <Wordmark onDark sub={platform ? 'HappyPix Platform' : user?.orgName || 'Organisation'} />
+            <Wordmark onDark sub={platform ? 'HappyPix Platform' : user?.orgName || 'Organization'} />
           </div>
         </div>
         <nav className="sidebar-nav">
@@ -125,14 +125,14 @@ function TopContext() {
     return (
       <span className="chip chip-pink" style={{ height: 26, fontSize: 12 }}>
         <span className="dot" />
-        Platform · {user.role === ROLES.OWNER ? 'Owner console' : 'Internal'}
+        Platform · {user.role === ROLES.OWNER ? 'Owner' : 'Internal'}
       </span>
     )
   }
   return (
     <span className="chip chip-neutral" style={{ height: 26, fontSize: 12, gap: 8 }}>
       <Icon name="building" size={13} />
-      {user.orgName || 'Organisation'}
+      {user.orgName || 'Organization'}
       {user.planStatus ? (
         <span className={`chip ${statusMeta(user.planStatus).chip}`} style={{ height: 18, padding: '0 7px', fontSize: 10.5 }}>
           {statusMeta(user.planStatus).label}

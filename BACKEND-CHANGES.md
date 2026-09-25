@@ -14,7 +14,7 @@ Conventions: errors are `{ "error": "message" }` with the status code
 
 ## 1. New models (Mongo collections)
 
-### `organisationStatus` (lifecycle state)
+### `organizationStatus` (lifecycle state)
 Stored on the `Organization` document:
 ```json
 {
@@ -106,7 +106,7 @@ A **frame is the canvas a print is made on**: the background design carries the 
 photo slots, and the complete output print (photos + the 15% branding footer) is printed
 on the frame. The catalogue is platform data — **only `OWNER` may add or remove frames**
 (`PLATFORM_ADMIN` reads it for the same *Templates & Frames* screen). **A frame cannot be
-removed while it is enabled (`allowed: true`) in any organisation's defaults → 409.**
+removed while it is enabled (`allowed: true`) in any organization's defaults → 409.**
 Orgs price each frame and switch booth availability in `OrganizationDefaults`.
 
 ### `OrganizationDefaults` (new collection — the single org config doc)
@@ -200,7 +200,7 @@ discount** (P0 SEC-07) — the server computes price from `OrganizationDefaults`
   "actorId": "userId | null",     // null = system
   "organizationId": "ObjectId | null",  // null = platform-level
   "action": "platform.org.suspended",   // dotted, typed
-  "entity": "organisation",
+  "entity": "organization",
   "summary": "Suspended vishal — reason: billing dispute",
   "severity": "info | warn | danger",
   "ip": "string | null",
@@ -243,17 +243,17 @@ Auth — profile
        orgs: [{ id, name, email, plan, planName, planStatus, expiry, daysLeft,
                 revenue, revenueThisMonth, revenueFY }] }`
 
-- `GET /api/platform/organisations?search=&status=&plan=&page=&limit=`
+- `GET /api/platform/organizations?search=&status=&plan=&page=&limit=`
   → `{ items: [{ id, name, email, ownerName, ownerEmail, plan, planName, status,
                  planStatus, planExpiry, planDaysLeft, devices, onlineDevices, activeEvents,
                  createdAt, lastActiveAt }], page, pages, total }`
-- `GET /api/platform/organisations/:id`
-  → full detail: `organisation, plan { planName, status, startDate, endDate, daysLeft,
+- `GET /api/platform/organizations/:id`
+  → full detail: `organization, plan { planName, status, startDate, endDate, daysLeft,
      deviceLimit, eventLimit, amountPaid, invoiceNo }, subscription, devices[], events[],
      revenue { total }, suspendReason`
-- `POST /api/platform/organisations/:id/suspend` body `{ reason }` (reason required) → 200
-- `POST /api/platform/organisations/:id/ban` body `{ reason }` (reason required) → 200
-- `POST /api/platform/organisations/:id/restore` → 200
+- `POST /api/platform/organizations/:id/suspend` body `{ reason }` (reason required) → 200
+- `POST /api/platform/organizations/:id/ban` body `{ reason }` (reason required) → 200
+- `POST /api/platform/organizations/:id/restore` → 200
   *(all three: OWNER only; audit-logged; blocks apply immediately to events/devices/booths)*
 
 - `GET /api/platform/audit?search=&actor=&action=&page=&limit=`
@@ -289,12 +289,12 @@ Auth — profile
   `{ name, description?, background: { type, colors[], pattern }, text?, defaultPrice? }`
   → 201 `{ frame }` (409 on duplicate name)
 - `DELETE /api/platform/frames/:id` (**OWNER only**) → 200
-  (409 while `enabledOrgs > 0` — disable it in those organisations' defaults first)
+  (409 while `enabledOrgs > 0` — disable it in those organizations' defaults first)
 
-### Organisation (scope = org role, tenant-scoped by org filter)
+### Organization (scope = org role, tenant-scoped by org filter)
 
 - `GET /api/org/dashboard`
-  → `{ organisation { name, contact, status },
+  → `{ organization { name, contact, status },
        plan { plan, planName, status, startDate, endDate, daysLeft, deviceLimit, eventLimit },
        usage { deviceLimit, eventLimit, devicesUsed, eventsUsed },
        revenue { total, thisMonth, fy, byStatus: { paid, pending, failed },
@@ -412,7 +412,7 @@ POST /api/auth/reset-password    { email, code, newPassword }
 ```
 PUT /api/org/devices/:id   { deviceName?, operatorName?, operatorPhone? }
 ```
-- Perm: `organisation.events.devices.manage` → **both ORG_ADMIN and ORG_MANAGER**.
+- Perm: `organization.events.devices.manage` → **both ORG_ADMIN and ORG_MANAGER**.
 - `deviceName` required non-empty; `operatorName`/`operatorPhone` nullable strings
   (phone ≤ 20 chars). The operator is the **on-ground booth worker, not a CRM user** —
   whoever assigns them records name + number so the whole team can reach them.
@@ -528,7 +528,7 @@ updated / deleted`.
   template; designer templates can only be published/unpublished, never
   edited or deleted.
 
-### 5.5 Organisation Defaults — layout pricing (replaces frame pricing)
+### 5.5 Organization Defaults — layout pricing (replaces frame pricing)
 
 `GET/PUT /api/org/defaults` now carry **`layoutPrices`** instead of `frames`:
 
@@ -550,7 +550,7 @@ layoutPrices: { "46:1": 30, "46:4": 40, "57:1": 70, "57:3": 90, ... }
 ### 5.6 Event branding — sponsor/host/venue logos (0–15, optional)
 
 Event create/update accept `branding.logos: string[]` (data-URIs / URLs) —
-**not** the organisation logo. They are the extra personalisation layer
+**not** the organization logo. They are the extra personalisation layer
 (sponsors, host, venue, player teams — the "BMW/Audi/Ferrari at a race"
 case) that each template places at its reserved footer positions.
 

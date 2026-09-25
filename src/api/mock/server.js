@@ -3,7 +3,7 @@
 // SAME rules the real backend must have:
 //   * JWT-style token auth (mock tokens)
 //   * fixed permission matrix (lib/roles.js) enforced server-side
-//   * organisation scoping for org-role users
+//   * organization scoping for org-role users
 //   * plan-limit enforcement on create/assign
 //   * derived statuses (plan, event, device online)
 // ============================================================
@@ -87,7 +87,7 @@ export function planSummary(org, subs) {
 function scopeOrg(reqUser, orgId) {
   if (isOrgRole(reqUser.role)) {
     if (!orgId || orgId !== reqUser.organizationId) {
-      throw new ApiError(403, 'You can only access your own organisation.')
+      throw new ApiError(403, 'You can only access your own organization.')
     }
     return reqUser.organizationId
   }
@@ -246,7 +246,7 @@ export function handle(method, path, body, token) {
     persist()
     logAudit(db, {
       actorId: u.id,
-      action: (isOrgRole(u.role) ? 'organisation' : 'platform') + '.auth.login',
+      action: (isOrgRole(u.role) ? 'organization' : 'platform') + '.auth.login',
       entity: 'user',
       summary: `${u.name} signed in to CRM`,
     })
@@ -351,7 +351,7 @@ export function handle(method, path, body, token) {
       // Body: { organizationId, eventId, deviceId, subject, category,
       //         priority, guestName, guestPhone, message, session }
       const { organizationId, eventId, deviceId, subject, session } = body || {}
-      const org = db.organisations.find((o) => o.id === organizationId)
+      const org = db.organizations.find((o) => o.id === organizationId)
       if (!org) throw new ApiError(400, 'organizationId is required.')
       if (!subject || !String(subject).trim()) throw new ApiError(400, 'Subject is required.')
       if (!session || !session.phone) throw new ApiError(400, 'Session context with the guest phone number is required.')
@@ -389,7 +389,7 @@ export function handle(method, path, body, token) {
   if (p === 'platform') {
     if (p2 === 'dashboard' && method === 'GET') {
       authed(PERMS.PLATFORM_DASHBOARD_VIEW)
-      const orgs = db.organisations
+      const orgs = db.organizations
       const devices = db.devices
       const events = db.events
       const subs = db.subscriptions
@@ -420,8 +420,8 @@ export function handle(method, path, body, token) {
             .map((o) => ({ id: o.id, name: o.name, createdAt: o.createdAt, plan: planSummary(o, subs).planName })),
           alerts: [
             ...expiring.map(({ ps }) => ({ kind: 'plan_expiring', text: `${ps.planName} plan expiring in ${ps.daysLeft} days`, tone: 'warn' })),
-            ...orgs.filter((o) => o.status === 'suspended').map((o) => ({ kind: 'suspended', text: `Organisation ${o.name} is suspended`, tone: 'warn' })),
-            ...orgs.filter((o) => o.status === 'banned').map((o) => ({ kind: 'banned', text: `Organisation ${o.name} is banned`, tone: 'danger' })),
+            ...orgs.filter((o) => o.status === 'suspended').map((o) => ({ kind: 'suspended', text: `Organization ${o.name} is suspended`, tone: 'warn' })),
+            ...orgs.filter((o) => o.status === 'banned').map((o) => ({ kind: 'banned', text: `Organization ${o.name} is banned`, tone: 'danger' })),
           ].slice(0, 6),
         },
       }
@@ -436,7 +436,7 @@ export function handle(method, path, body, token) {
       const net = subs.reduce((s, x) => s + x.amount, 0)
       const fyRev = subs.filter((s) => new Date(s.paidAt) >= fy).reduce((s, x) => s + x.amount, 0)
       const monthRev = subs.filter((s) => new Date(s.paidAt) >= monthStart).reduce((s, x) => s + x.amount, 0)
-      const orgRows = db.organisations.map((o) => {
+      const orgRows = db.organizations.map((o) => {
         const sub = db.subscriptions.find((s) => s.organizationId === o.id && s.amount > 0)
         const ps = planSummary(o, db.subscriptions)
         const thisMonth = sub && new Date(sub.paidAt) >= monthStart ? sub.amount : 0
@@ -459,10 +459,10 @@ export function handle(method, path, body, token) {
       }
     }
 
-    if (p2 === 'organisations' && method === 'GET') {
+    if (p2 === 'organizations' && method === 'GET') {
       authed(PERMS.PLATFORM_ORGS_VIEW)
       const q = url.searchParams
-      let rows = db.organisations.map((o) => {
+      let rows = db.organizations.map((o) => {
         const ps = planSummary(o, db.subscriptions)
         const devices = db.devices.filter((d) => d.organizationId === o.id)
         const events = db.events.filter((e) => e.organizationId === o.id)
@@ -485,10 +485,10 @@ export function handle(method, path, body, token) {
       return { status: 200, data: paginated(rows, { page: q.get('page'), limit: q.get('limit') || 25 }) }
     }
 
-    if (p2 === 'organisations' && p3 && method === 'GET') {
+    if (p2 === 'organizations' && p3 && method === 'GET') {
       authed(PERMS.PLATFORM_ORGS_VIEW)
-      const o = db.organisations.find((x) => x.id === p3)
-      if (!o) throw new ApiError(404, 'Organisation not found.')
+      const o = db.organizations.find((x) => x.id === p3)
+      if (!o) throw new ApiError(404, 'Organization not found.')
       const ps = planSummary(o, db.subscriptions)
       const devices = db.devices.filter((d) => d.organizationId === o.id).map((d) => ({ ...d, online: computeDeviceOnline(d) }))
       const events = db.events.filter((e) => e.organizationId === o.id).map((e) => ({ ...e, status: computeEventStatus(e) }))
@@ -497,29 +497,29 @@ export function handle(method, path, body, token) {
       return { status: 200, data: { ...o, plan: ps, subscription: sub || null, devices, events, revenue: rev } }
     }
 
-    if (p2 === 'organisations' && p3 && parts[3] && method === 'POST') {
+    if (p2 === 'organizations' && p3 && parts[3] && method === 'POST') {
       authed(PERMS.PLATFORM_ORG_SUSPEND)
-      const o = db.organisations.find((x) => x.id === p3)
-      if (!o) throw new ApiError(404, 'Organisation not found.')
+      const o = db.organizations.find((x) => x.id === p3)
+      if (!o) throw new ApiError(404, 'Organization not found.')
       const action = parts[3]
       const reason = String((body && body.reason) || '').trim()
       if (action === 'suspend') {
-        if (!reason) throw new ApiError(400, 'A reason is required to suspend an organisation.')
+        if (!reason) throw new ApiError(400, 'A reason is required to suspend an organization.')
         o.status = 'suspended'
         o.suspendReason = reason
-        logAudit(db, { actorId: user.id, action: 'platform.organisation.suspended', entity: 'organisation', summary: `Organisation “${o.name}” suspended — ${reason}`, organizationId: o.id, severity: 'warn' })
+        logAudit(db, { actorId: user.id, action: 'platform.organization.suspended', entity: 'organization', summary: `Organization “${o.name}” suspended — ${reason}`, organizationId: o.id, severity: 'warn' })
       } else if (action === 'ban') {
-        if (!reason) throw new ApiError(400, 'A reason is required to ban an organisation.')
+        if (!reason) throw new ApiError(400, 'A reason is required to ban an organization.')
         o.status = 'banned'
         o.suspendReason = reason
-        logAudit(db, { actorId: user.id, action: 'platform.organisation.banned', entity: 'organisation', summary: `Organisation “${o.name}” banned — ${reason}`, organizationId: o.id, severity: 'danger' })
+        logAudit(db, { actorId: user.id, action: 'platform.organization.banned', entity: 'organization', summary: `Organization “${o.name}” banned — ${reason}`, organizationId: o.id, severity: 'danger' })
       } else if (action === 'restore') {
         o.status = 'active'
         o.suspendReason = null
-        logAudit(db, { actorId: user.id, action: 'platform.organisation.restored', entity: 'organisation', summary: `Organisation “${o.name}” restored`, organizationId: o.id })
+        logAudit(db, { actorId: user.id, action: 'platform.organization.restored', entity: 'organization', summary: `Organization “${o.name}” restored`, organizationId: o.id })
       } else throw new ApiError(404, 'Unknown action.')
       persist()
-      return { status: 200, data: { ok: true, organisation: o } }
+      return { status: 200, data: { ok: true, organization: o } }
     }
 
     if (p2 === 'audit' && method === 'GET') {
@@ -663,7 +663,7 @@ export function handle(method, path, body, token) {
         actorId: user.id,
         action: body.active === false ? 'platform.template.unpublished' : publishing ? 'platform.template.published' : 'platform.template.updated',
         entity: 'template',
-        summary: `Global template “${t.name}” ${body.active === false ? 'unpublished — hidden from organisations' : publishing ? 'published — available to all organisations' : 'updated'}`,
+        summary: `Global template “${t.name}” ${body.active === false ? 'unpublished — hidden from organizations' : publishing ? 'published — available to all organizations' : 'updated'}`,
       })
       persist()
       return { status: 200, data: { template: withTemplateLayout(t) } }
@@ -682,13 +682,13 @@ export function handle(method, path, body, token) {
     }
   }
 
-  // ================= ORGANISATION =================
+  // ================= ORGANIZATION =================
   if (p === 'org') {
     const u = authed()
-    if (!isOrgRole(u.role)) throw new ApiError(403, 'Organisation APIs require an organisation user.')
+    if (!isOrgRole(u.role)) throw new ApiError(403, 'Organization APIs require an organization user.')
     const orgId = u.organizationId
-    const org = db.organisations.find((o) => o.id === orgId)
-    if (!org) throw new ApiError(404, 'Organisation not found.')
+    const org = db.organizations.find((o) => o.id === orgId)
+    if (!org) throw new ApiError(404, 'Organization not found.')
     const ps = planSummary(org, db.subscriptions)
     const orgPlanBlocked = ['suspended', 'banned'].includes(org.status) || ps.status === 'expired'
 
@@ -706,10 +706,10 @@ export function handle(method, path, body, token) {
       if (activeCount >= ps.eventLimit) warnings.push({ kind: 'event_limit', text: `Parallel active event limit reached (${activeCount}/${ps.eventLimit}).`, tone: 'warn' })
       const offline = devices.filter((d) => !computeDeviceOnline(d))
       if (org.status !== 'suspended' && org.status !== 'banned' && offline.length) warnings.push({ kind: 'booth_offline', text: `${offline.length} booth(s) currently offline.`, tone: 'info' })
-      if (orgPlanBlocked) warnings.push({ kind: 'org_blocked', text: org.status === 'banned' ? 'Your organisation access is currently banned. Contact HappyPix support.' : 'Your organisation is suspended. Contact HappyPix support.', tone: 'danger' })
+      if (orgPlanBlocked) warnings.push({ kind: 'org_blocked', text: org.status === 'banned' ? 'Your organization access is currently banned. Contact HappyPix support.' : 'Your organization is suspended. Contact HappyPix support.', tone: 'danger' })
 
       const data = {
-        organisation: { id: org.id, name: org.name, ownerName: org.ownerName, email: org.email },
+        organization: { id: org.id, name: org.name, ownerName: org.ownerName, email: org.email },
         plan: ps,
         usage: {
           devicesUsed: devices.length, deviceLimit: ps.deviceLimit,
@@ -795,12 +795,12 @@ export function handle(method, path, body, token) {
         authed(PERMS.EVENT_CREATE)
         // v2 event creation — General + Customisation + Branding.
         // There is NO price and NO passkey here: print pricing lives in
-        // Organisation Defaults (per frame), and booth access is via the
+        // Organization Defaults (per frame), and booth access is via the
         // booth app, not a CRM-entered passkey.
         const { name, location, clientName, startDate, endDate, digitalCopy, filters, templateIds, branding } = body || {}
         if (!name || !startDate || !endDate) throw new ApiError(400, 'Event name, start and end are required.')
         if (new Date(startDate) >= new Date(endDate)) throw new ApiError(400, 'End time must be after start time.')
-        if (orgPlanBlocked) throw new ApiError(403, org.status === 'expired' || ps.status === 'expired' ? 'Plan expired — renew your plan to create events.' : 'Organisation is ' + org.status + ' — new events are blocked.')
+        if (orgPlanBlocked) throw new ApiError(403, org.status === 'expired' || ps.status === 'expired' ? 'Plan expired — renew your plan to create events.' : 'Organization is ' + org.status + ' — new events are blocked.')
         const active = db.events.filter((e) => e.organizationId === orgId && computeEventStatus(e) === 'active').length
         if (active >= ps.eventLimit) throw new ApiError(403, `Your ${ps.planName} plan allows a maximum of ${ps.eventLimit} parallel active event(s).`)
         const tids = Array.isArray(templateIds) ? templateIds : []
@@ -985,7 +985,7 @@ export function handle(method, path, body, token) {
       const t = db.tickets.find((x) => x.id === p3 && x.organizationId === orgId)
       if (!t) throw new ApiError(404, 'Ticket not found.')
       if (!String((body && body.message) || '').trim()) throw new ApiError(400, 'Message cannot be empty.')
-      const roleLabel = u.role === ROLES.ORG_ADMIN ? 'Organisation Admin' : 'Organisation Manager'
+      const roleLabel = u.role === ROLES.ORG_ADMIN ? 'Organization Admin' : 'Organization Manager'
       t.messages.push({ id: uid('m'), author: `${u.name} (${roleLabel})`, at: NOW().toISOString(), text: String(body.message).trim() })
       if (t.status === 'open') t.status = 'in_progress'
       t.updatedAt = NOW().toISOString()
@@ -997,7 +997,7 @@ export function handle(method, path, body, token) {
       const t = db.tickets.find((x) => x.id === p3 && x.organizationId === orgId)
       if (!t) throw new ApiError(404, 'Ticket not found.')
       t.status = 'resolved'
-      t.resolution = String((body && body.note) || t.resolution || 'Resolved by organisation team.')
+      t.resolution = String((body && body.note) || t.resolution || 'Resolved by organization team.')
       t.updatedAt = NOW().toISOString()
       logAudit(db, { actorId: u.id, action: 'ticket.resolved', entity: 'ticket', summary: `Ticket “${t.subject}” resolved`, organizationId: orgId })
       persist()
@@ -1062,7 +1062,7 @@ export function handle(method, path, body, token) {
           cur.layoutPrices = prices
         }
         db.orgDefaults[orgId] = cur
-        logAudit(db, { actorId: u.id, action: 'organisation.defaults.updated', entity: 'organisation', summary: `Layout prices / defaults updated for ${org.name}`, organizationId: orgId })
+        logAudit(db, { actorId: u.id, action: 'organization.defaults.updated', entity: 'organization', summary: `Layout prices / defaults updated for ${org.name}`, organizationId: orgId })
         persist()
         return { status: 200, data: cur }
       }
@@ -1144,7 +1144,7 @@ export function handle(method, path, body, token) {
         // Role is server-selected: ORG_MANAGER. The client can never pick it.
         const nu = { id: uid('usr'), name, email, password, role: ROLES.ORG_MANAGER, organizationId: orgId, status: 'active', photoUrl: null, createdAt: NOW().toISOString(), lastLoginAt: null }
         db.users.push(nu)
-        logAudit(db, { actorId: u.id, action: 'organisation.team.created', entity: 'user', summary: `Organisation Manager ${name} created`, organizationId: orgId })
+        logAudit(db, { actorId: u.id, action: 'organization.team.created', entity: 'user', summary: `Organization Manager ${name} created`, organizationId: orgId })
         persist()
         return { status: 201, data: { user: userPublic(nu) } }
       }
@@ -1155,7 +1155,7 @@ export function handle(method, path, body, token) {
       if (!m) throw new ApiError(404, 'Team member not found.')
       if (body.name) m.name = body.name
       if (body.email) m.email = body.email
-      logAudit(db, { actorId: u.id, action: 'organisation.team.updated', entity: 'user', summary: `Organisation Manager ${m.name} updated`, organizationId: orgId })
+      logAudit(db, { actorId: u.id, action: 'organization.team.updated', entity: 'user', summary: `Organization Manager ${m.name} updated`, organizationId: orgId })
       persist()
       return { status: 200, data: { user: userPublic(m) } }
     }
@@ -1164,7 +1164,7 @@ export function handle(method, path, body, token) {
       const m = db.users.find((x) => x.id === p3 && x.organizationId === orgId)
       if (!m) throw new ApiError(404, 'Team member not found.')
       m.status = 'inactive'
-      logAudit(db, { actorId: u.id, action: 'organisation.team.deactivated', entity: 'user', summary: `Organisation Manager ${m.name} deactivated`, organizationId: orgId, severity: 'warn' })
+      logAudit(db, { actorId: u.id, action: 'organization.team.deactivated', entity: 'user', summary: `Organization Manager ${m.name} deactivated`, organizationId: orgId, severity: 'warn' })
       persist()
       return { status: 200, data: { ok: true } }
     }
@@ -1173,7 +1173,7 @@ export function handle(method, path, body, token) {
       const m = db.users.find((x) => x.id === p3 && x.organizationId === orgId)
       if (!m) throw new ApiError(404, 'Team member not found.')
       m.status = 'active'
-      logAudit(db, { actorId: u.id, action: 'organisation.team.updated', entity: 'user', summary: `Organisation Manager ${m.name} re-activated`, organizationId: orgId })
+      logAudit(db, { actorId: u.id, action: 'organization.team.updated', entity: 'user', summary: `Organization Manager ${m.name} re-activated`, organizationId: orgId })
       persist()
       return { status: 200, data: { ok: true } }
     }
@@ -1183,7 +1183,7 @@ export function handle(method, path, body, token) {
       if (!m) throw new ApiError(404, 'Team member not found.')
       const temp = 'Hap' + Math.random().toString(36).slice(2, 10)
       m.password = temp
-      logAudit(db, { actorId: u.id, action: 'organisation.team.password_reset', entity: 'user', summary: `Password reset for ${m.name}`, organizationId: orgId, severity: 'warn' })
+      logAudit(db, { actorId: u.id, action: 'organization.team.password_reset', entity: 'user', summary: `Password reset for ${m.name}`, organizationId: orgId, severity: 'warn' })
       persist()
       return { status: 200, data: { tempPassword: temp } }
     }

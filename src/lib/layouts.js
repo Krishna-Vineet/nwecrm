@@ -18,22 +18,22 @@ export const FOOTER_RATIO = 0.15
 // families: id, name, print code(s), cutout inches [w,h] (portrait),
 // sheet(s) it is cut from, image-slot iterations, suggested base price.
 export const LAYOUT_FAMILIES = [
-  { id: '46-23',   name: 'Pocket Polaroid',       code: '46-23',            cutout: [2, 3],   sheets: ['4x6'],            slots: [1],       base: 20, blurb: 'Tiny keepable polaroid — giveaways and ice-breakers.' },
-  { id: '46-26',   name: 'Classic Duo Strip',     code: '46-26',            cutout: [2, 6],   sheets: ['4x6'],            slots: [3, 4],    base: 30, blurb: 'The classic photo strip, two-up per 4x6 sheet.' },
-  { id: '68-38',   name: 'Custom Bookmark',       code: '68-38 / 812-38',   cutout: [3, 8],   sheets: ['6x8', '8x12'],    slots: [3, 4],    base: 40, blurb: 'Tall bookmark cut — event keepsake with room for art.' },
-  { id: '46',      name: 'Standard Postcard',     code: '46',               cutout: [4, 6],   sheets: ['4x6'],            slots: [1, 3, 4], base: 30, blurb: 'The everyday 4x6 postcard.' },
-  { id: '810-410', name: 'Panoramic Mini',        code: '810-410',          cutout: [4, 10],  sheets: ['8x10'],           slots: [3, 4],    base: 60, blurb: 'Slim panoramic cut from 8x10 stock.' },
-  { id: '812-412', name: 'Panoramic Wide',        code: '812-412',          cutout: [4, 12],  sheets: ['8x12'],           slots: [4, 5],    base: 70, blurb: 'Cinematic 4x12 panorama from poster stock.' },
-  { id: '57',      name: 'Portrait Keep-Safe',    code: '57',               cutout: [5, 7],   sheets: ['5x7'],            slots: [1, 3],    base: 50, blurb: 'Framable 5x7 portrait print.' },
-  { id: '57-257',  name: 'Bookmark Strip',        code: '57-257',           cutout: [2.5, 7], sheets: ['5x7'],            slots: [3, 4],    base: 40, blurb: 'Two bookmark strips per 5x7 sheet.' },
-  { id: '68',      name: 'Gala Display',          code: '68',               cutout: [6, 8],   sheets: ['6x8'],            slots: [1, 3, 4], base: 60, blurb: 'Gallery-size 6x8 display print.' },
-  { id: '68-26',   name: 'Triple Gala Strip',     code: '68-26',            cutout: [2, 6],   sheets: ['6x8'],            slots: [3, 4],    base: 50, blurb: 'Premium strip stock — three 2x6 strips per 6x8.' },
-  { id: '68-46',   name: 'Double Postcard Cut',   code: '68-46',            cutout: [4, 6],   sheets: ['6x8'],            slots: [1, 3, 4], base: 50, blurb: 'Two 4x6 postcards ganged on 6x8 stock.' },
-  { id: '810',     name: 'Grand Guestbook Print', code: '810',              cutout: [8, 10],  sheets: ['8x10'],           slots: [1, 4, 6, 9], base: 80, blurb: 'Big 8x10 — guestbook signings and group grids.' },
-  { id: '810-210', name: 'Collector Strip',       code: '810-210',          cutout: [2, 10],  sheets: ['8x10'],           slots: [3, 4, 5], base: 40, blurb: 'Extra-tall 2x10 collector reel.' },
-  { id: '810-258', name: 'Wide Strip Cut',        code: '810-258',          cutout: [2.5, 8], sheets: ['8x10'],           slots: [3, 4],    base: 35, blurb: 'Wide bookmark cut from 8x10 stock.' },
-  { id: '812',     name: 'Poster Showcase',       code: '812',              cutout: [8, 12],  sheets: ['8x12'],           slots: [1, 6, 8], base: 90, blurb: 'Full 8x12 poster — the showpiece print.' },
-  { id: '812-68',  name: 'Quad Strip Reel',       code: '812-68',           cutout: [2, 6],   sheets: ['8x12'],           slots: [3, 4],    base: 60, blurb: 'Four premium strips ganged on 8x12 poster stock.' },
+  { id: '46-23',   name: 'Pocket Polaroid',       code: '46-23',            cutout: [2, 3],   sheets: ['4x6'],            slots: [1],           base: 20, blurb: 'Tiny keepable polaroid — giveaways and ice-breakers.' },
+  { id: '46-26',   name: 'Classic Duo Strip',     code: '46-26',            cutout: [2, 6],   sheets: ['4x6'],            slots: [3, 4],        base: 30, blurb: 'The classic photo strip, two-up per 4x6 sheet.' },
+  { id: '68-38',   name: 'Custom Bookmark',       code: '68-38 / 812-38',   cutout: [3, 8],   sheets: ['6x8', '8x12'],    slots: [3, 4],        base: 40, blurb: 'Tall bookmark cut — event keepsake with room for art.' },
+  { id: '46',      name: 'Standard Postcard',     code: '46',               cutout: [4, 6],   sheets: ['4x6'],            slots: [1, 3, 4],     base: 30, blurb: 'The everyday 4x6 postcard.' },
+  { id: '810-410', name: 'Panoramic Mini',        code: '810-410',          cutout: [4, 10],  sheets: ['8x10'],           slots: [3, 4],        base: 60, blurb: 'Slim panoramic cut from 8x10 stock.' },
+  { id: '812-412', name: 'Panoramic Wide',        code: '812-412',          cutout: [4, 12],  sheets: ['8x12'],           slots: [4, 5],        base: 70, blurb: 'Cinematic 4x12 panorama from poster stock.' },
+  { id: '57',      name: 'Portrait Keep-Safe',    code: '57',               cutout: [5, 7],   sheets: ['5x7'],            slots: [1, 3],        base: 50, blurb: 'Framable 5x7 portrait print.' },
+  { id: '57-257',  name: 'Bookmark Strip',        code: '57-257',           cutout: [2.5, 7], sheets: ['5x7'],            slots: [3, 4],        base: 40, blurb: 'Two bookmark strips per 5x7 sheet.' },
+  { id: '68',      name: 'Gala Display',          code: '68',               cutout: [6, 8],   sheets: ['6x8'],            slots: [1, 3, 4],     base: 60, blurb: 'Gallery-size 6x8 display print.' },
+  { id: '68-26',   name: 'Triple Gala Strip',     code: '68-26',            cutout: [2, 6],   sheets: ['6x8'],            slots: [3, 4],        base: 50, blurb: 'Premium strip stock — three 2x6 strips per 6x8.' },
+  { id: '68-46',   name: 'Double Postcard Cut',   code: '68-46',            cutout: [4, 6],   sheets: ['6x8'],            slots: [1, 3, 4],     base: 50, blurb: 'Two 4x6 postcards ganged on 6x8 stock.' },
+  { id: '810',     name: 'Grand Guestbook Print', code: '810',              cutout: [8, 10],  sheets: ['8x10'],           slots: [1, 4, 6, 9],  base: 80, blurb: 'Big 8x10 — guestbook signings and group grids.' },
+  { id: '810-210', name: 'Collector Strip',       code: '810-210',          cutout: [2, 10],  sheets: ['8x10'],           slots: [3, 4, 5],     base: 40, blurb: 'Extra-tall 2x10 collector reel.' },
+  { id: '810-258', name: 'Wide Strip Cut',        code: '810-258',          cutout: [2.5, 8], sheets: ['8x10'],           slots: [3, 4],        base: 35, blurb: 'Wide bookmark cut from 8x10 stock.' },
+  { id: '812',     name: 'Poster Showcase',       code: '812',              cutout: [8, 12],  sheets: ['8x12'],           slots: [1, 6, 8],     base: 90, blurb: 'Full 8x12 poster — the showpiece print.' },
+  { id: '812-68',  name: 'Quad Strip Reel',       code: '812-68',           cutout: [2, 6],   sheets: ['8x12'],           slots: [3, 4],        base: 60, blurb: 'Four premium strips ganged on 8x12 poster stock.' },
 ]
 
 const UNIT = 250 // px per inch in layout space
@@ -98,7 +98,7 @@ export const TEMPLATE_CATEGORIES = ['Classic', 'Weddings', 'Parties', 'Corporate
 
 // ---------- suggested price per layout iteration ----------
 // What the guest pays for the print — org admins override per layout
-// in Organisation Defaults. Price does not change with orientation
+// in Organization Defaults. Price does not change with orientation
 // (same print cost), only with the layout's size and image count.
 const SLOT_ADD = { 1: 0, 3: 10, 4: 10, 5: 20, 6: 30, 8: 60, 9: 40 }
 
@@ -110,7 +110,7 @@ export function suggestedPrice(familyId, slots) {
 
 export const PRICE_KEY = (familyId, slots) => `${familyId}:${slots}`
 
-// full suggested price map — the seed/default for every organisation
+// full suggested price map — the seed/default for every organization
 export function suggestedPriceMap() {
   const out = {}
   for (const f of LAYOUT_FAMILIES) for (const s of f.slots) out[PRICE_KEY(f.id, s)] = suggestedPrice(f.id, s)

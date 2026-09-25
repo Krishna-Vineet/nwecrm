@@ -1,7 +1,7 @@
-// Organisation Defaults — the org's single configuration surface.
+// Organization Defaults — the org's single configuration surface.
 //
 // What lives here (and nothing else):
-//   • Identity            — organisation name + logo
+//   • Identity            — organization name + logo
 //   • Booth behaviour     — idle timeout, in SECONDS
 //   • Layouts & pricing   — the 16 platform layout families (cut sizes)
 //                           with their image-slot iterations. The org
@@ -83,7 +83,7 @@ export default function OrgDefaults() {
       })
       setD(saved)
       setDirty(false)
-      toast('Organisation defaults saved')
+      toast('Organization defaults saved')
     } catch (err) {
       toast(err.message, 'error')
     } finally {
@@ -97,9 +97,9 @@ export default function OrgDefaults() {
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Organisation Defaults</div>
+          <div className="page-title">Organization Defaults</div>
           <div className="page-sub">
-            Your organisation's single configuration surface: identity, booth idle timeout, and what guests pay for
+            Your organization's single configuration surface: identity, booth idle timeout, and what guests pay for
             every layout at your booths. Events never carry prices.
           </div>
         </div>
@@ -113,7 +113,7 @@ export default function OrgDefaults() {
       {readOnly ? (
         <div style={{ marginBottom: 14 }}>
           <WarnBanner tone="info" icon="info">
-            Read-only — layout prices, logo and booth settings can only be changed by your Organisation Admin.
+            Read-only — layout prices, logo and booth settings can only be changed by your Organization Admin.
           </WarnBanner>
         </div>
       ) : dirty ? (
@@ -146,7 +146,7 @@ export default function OrgDefaults() {
                 )}
               </div>
             </div>
-            <Field label="Organisation name" required>
+            <Field label="Organization name" required>
               <TextInput value={d.name} onChange={(e) => set('name', e.target.value)} disabled={readOnly} style={disabledInput} />
             </Field>
           </div>

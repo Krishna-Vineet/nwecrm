@@ -33,7 +33,7 @@ export default function OrgRevenue() {
     <div>
       <div className="page-head">
         <div>
-          <div className="page-title">Organisation Revenue</div>
+          <div className="page-title">Organization Revenue</div>
           <div className="page-sub">What your booths earn — print sales per event, per device. Read-only reporting.</div>
         </div>
         <div className="row gap-8">

@@ -96,7 +96,7 @@ export default function Profile() {
             </div>
             {user?.orgName ? (
               <div className="row between" style={{ padding: '10px 0' }}>
-                <span className="t12 muted">Organisation</span>
+                <span className="t12 muted">Organization</span>
                 <span className="t13 fw6">{user.orgName}</span>
               </div>
             ) : null}

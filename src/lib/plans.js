@@ -1,4 +1,4 @@
-// Subscription plans — spec 03 §6 / 05 §3.
+// Subscription plans
 // Purchases happen on the HappyPix display website; the CRM only
 // reads the resulting plan/subscription state. Nothing here is editable.
 
@@ -15,7 +15,7 @@ export function planDef(key) {
   return PLANS[key] || PLANS.trial
 }
 
-// Plan / organisation statuses (spec 05 §3)
+// Plan / organization statuses
 export const PLAN_STATUSES = {
   trial: { label: 'Trial', chip: 'chip-trial' },
   active: { label: 'Active', chip: 'chip-active' },

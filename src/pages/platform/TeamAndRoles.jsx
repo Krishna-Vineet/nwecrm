@@ -86,11 +86,13 @@ export default function TeamAndRoles() {
         {isOwner ? <Button variant="primary" icon="plus" onClick={() => setEditing('new')}>New internal user</Button> : null}
       </div>
 
-      {!isOwner && (
-        <WarnBanner tone="info" icon="info" className="mb-16">
+      <div className="mb-16">
+        {!isOwner && (
+        <WarnBanner tone="info" icon="info">
           Your role has read-only visibility here. User management is restricted to the Owner.
         </WarnBanner>
       )}
+      </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
         <Card>
@@ -139,18 +141,12 @@ export default function TeamAndRoles() {
                   <Chip tone={r === ROLES.OWNER ? 'pink' : r === ROLES.PLATFORM_ADMIN ? 'purple' : r === ROLES.SUPPORT_MANAGER ? 'info' : r === ROLES.ORG_ADMIN ? 'active' : 'neutral'}>
                     {ROLE_LABELS[r]}
                   </Chip>
-                  <span className="t11 faint">{r === ROLES.OWNER || r === ROLES.PLATFORM_ADMIN || r === ROLES.SUPPORT_MANAGER ? 'Platform scope' : 'Organisation scope'}</span>
+                  <span className="t11 faint">{r === ROLES.OWNER || r === ROLES.PLATFORM_ADMIN || r === ROLES.SUPPORT_MANAGER ? 'Platform scope' : 'Organization scope'}</span>
                 </div>
                 <p className="t12 muted mt-8" style={{ lineHeight: 1.5 }}>{ROLE_DESCRIPTIONS[r]}</p>
               </div>
             ))}
-            <div style={{ padding: '14px 18px', background: 'var(--surface-2)', borderRadius: '0 0 var(--r-lg) var(--r-lg)' }}>
-              <p className="t11" style={{ color: 'var(--muted)', lineHeight: 1.6 }}>
-                <Icon name="shield" size={12} style={{ verticalAlign: '-1px', marginRight: 5 }} />
-                Booths are <b>devices</b>, not users — they pair with a generated UUID and never hold a CRM account.
-                Guest users never exist in the CRM.
-              </p>
-            </div>
+           
           </div>
         </Card>
       </div>
