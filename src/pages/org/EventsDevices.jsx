@@ -3,14 +3,21 @@
 // Event creation/updates ask exactly four things — no price, no passkey:
 //   1. General       — event name, client/host, location, start, end,
 //                      digital-copy toggle
-//   2. Customisation — photo filters (from the available options) +
-//                      templates (from all available platform templates)
-//   3. Branding      — client logo (default: none; may be added to the
-//                      print footer) + default tagline (editable later)
+//   2. Customisation — photo filters + the TEMPLATE GALLERY: every
+//                      published platform template, grouped by its layout
+//                      variant (cut size × orientation × image slots) and
+//                      filterable. All templates are pre-selected; the
+//                      organiser deselects what they don't want, with
+//                      select-all / clear-all bulk actions on the filtered
+//                      view.
+//   3. Branding      — event logos (sponsors / host / venue / teams —
+//                      NOT the org logo; up to 15, optional) placed by
+//                      each template at its reserved footer positions,
+//                      + default tagline (editable later)
 //
-// Print pricing lives only in Organisation Defaults (per frame, set by the
-// org admin). Booth guest access is handled by the booth app, not a
-// CRM-entered passkey.
+// Print pricing lives only in Organisation Defaults (per layout iteration,
+// set by the org admin). Booth guest access is handled by the booth app,
+// not a CRM-entered passkey.
 
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { api } from '../../api/index.js'
@@ -22,10 +29,12 @@ import {
 import { Icon } from '../../lib/icons.jsx'
 import { dateShort, dateMed, relativeTime, uuidShort } from '../../lib/format.js'
 import { FILTERS, EVENT_STATUSES } from '../../lib/plans.js'
-import { FRAME_BY_ID } from '../../lib/frames.js'
-import { templateSlotsLabel } from '../../lib/templates.js'
 import { ROLES } from '../../lib/roles.js'
-import FramePreview from '../../components/FramePreview.jsx'
+import TemplatePreview from '../../components/TemplatePreview.jsx'
+import {
+  LAYOUT_FAMILIES, LAYOUTS, layoutById, layoutLabel, layoutShortLabel, PRICE_KEY,
+  ORIENTATION_OPTIONS, SHEET_OPTIONS, SLOT_OPTIONS, TEMPLATE_CATEGORIES,
+} from '../../lib/layouts.js'
 
 const statusChip = (s) => EVENT_STATUSES[s] || EVENT_STATUSES.upcoming
 
@@ -581,6 +590,8 @@ function DeviceEditModal({ device, onClose, onSaved }) {
 
 // ---------------- Event editor: General / Customisation / Branding ----------------
 
+const FAMILY_ORDER = Object.fromEntries(LAYOUT_FAMILIES.map((f, i) => [f.id, i]))
+
 function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
   const { toast } = useApp()
   const [busy, setBusy] = useState(false)
@@ -593,21 +604,91 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
     endDate: initial ? toLocalInput(initial.endDate) : '',
     digitalCopy: initial ? initial.digitalCopy !== false : false,
     filters: initial?.filters || [],
-    templateIds: initial?.templateIds || [],
-    logoUrl: initial?.branding?.logoUrl || null,
+    // Templates: every published template is pre-selected for new events;
+    // edits keep the event's saved selection.
+    templateIds: initial ? (initial.templateIds || []) : templates.map((t) => t.id),
+    logos: initial?.branding?.logos || (initial?.branding?.logoUrl ? [initial.branding.logoUrl] : []),
     tagline: initial?.branding?.tagline || '',
   }))
+  const [tf, setTf] = useState({ orientation: '', sheet: '', slots: '', category: '' })
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }))
   const toggleIn = (key, id) =>
     setForm((f) => ({ ...f, [key]: f[key].includes(id) ? f[key].filter((x) => x !== id) : [...f[key], id] }))
 
-  const onLogoFile = (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const r = new FileReader()
-    r.onload = () => set('logoUrl', r.result)
-    r.readAsDataURL(file)
+  const toggleTemplate = (id) => toggleIn('templateIds', id)
+
+  const filteredTemplates = useMemo(() => {
+    let r = templates
+    if (tf.orientation) r = r.filter((t) => t.layout?.orientation === tf.orientation)
+    if (tf.sheet) r = r.filter((t) => t.layout?.sheets?.includes(tf.sheet))
+    if (tf.slots) r = r.filter((t) => t.layout?.slots === Number(tf.slots))
+    if (tf.category) r = r.filter((t) => t.category === tf.category)
+    return r
+  }, [templates, tf])
+
+  // Group the visible templates by layout variant, catalogue order.
+  const groups = useMemo(() => {
+    const map = new Map()
+    for (const t of filteredTemplates) {
+      if (!map.has(t.layoutId)) map.set(t.layoutId, [])
+      map.get(t.layoutId).push(t)
+    }
+    return [...map.entries()]
+      .map(([layoutId, list]) => ({ layout: layoutById(layoutId), list }))
+      .filter((g) => g.layout)
+      .sort((a, b) =>
+        FAMILY_ORDER[a.layout.familyId] - FAMILY_ORDER[b.layout.familyId] ||
+        a.layout.slots - b.layout.slots ||
+        (a.layout.orientation === 'portrait' ? -1 : 1)
+      )
+  }, [filteredTemplates])
+
+  const selectAllShown = () =>
+    setForm((f) => ({ ...f, templateIds: [...new Set([...f.templateIds, ...filteredTemplates.map((t) => t.id)])] }))
+  const clearShown = () =>
+    setForm((f) => ({ ...f, templateIds: f.templateIds.filter((id) => !filteredTemplates.some((t) => t.id === id)) }))
+
+  const addLogos = (e) => {
+    const files = [...(e.target.files || [])]
+    e.target.value = ''
+    if (!files.length) return
+    setForm((f) => {
+      const room = 15 - f.logos.length
+      if (room <= 0) {
+        toast('A maximum of 15 logos per event.', 'error')
+        return f
+      }
+      const take = files.slice(0, room)
+      const tooBig = files.length > room || files.length > 15
+      Promise.all(
+        take.map(
+          (file) =>
+            new Promise((resolve) => {
+              if (file.size > 300 * 1024) {
+                toast(`“${file.name}” is over 300 KB — skipped.`, 'error')
+                resolve(null)
+                return
+              }
+              const r = new FileReader()
+              r.onload = () => resolve(r.result)
+              r.onerror = () => resolve(null)
+              r.readAsDataURL(file)
+            })
+        )
+      ).then((urls) => {
+        const ok = urls.filter(Boolean)
+        setForm((cur) => ({ ...cur, logos: [...cur.logos, ...ok].slice(0, 15) }))
+        if (ok.length) toast(`${ok.length} logo${ok.length > 1 ? 's' : ''} added`)
+      })
+      if (tooBig && f.logos.length + files.length > 15) toast('A maximum of 15 logos per event.', 'error')
+      return f
+    })
   }
+
+  const previewTemplate = useMemo(
+    () => templates.find((t) => t.id === form.templateIds[0]) || templates[0] || null,
+    [templates, form.templateIds]
+  )
 
   const save = async () => {
     setError('')
@@ -625,7 +706,7 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
         digitalCopy: form.digitalCopy,
         filters: form.filters,
         templateIds: form.templateIds,
-        branding: { logoUrl: form.logoUrl, tagline: form.tagline.trim() },
+        branding: { logos: form.logos, tagline: form.tagline.trim() },
       }
       if (initial) await api.org.updateEvent(initial.id, body)
       else await api.org.createEvent(body)
@@ -640,16 +721,14 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
 
   if (!open) return null
 
-  const allowedFrames = (defaults?.frames || []).filter((f) => f.allowed)
-  const previewTemplate = templates.find((t) => t.id === form.templateIds[0])
-  const previewFrame = FRAME_BY_ID[allowedFrames[0]?.frameId] || FRAME_BY_ID['frame-classic']
+  const priceFor = (l) => defaults?.layoutPrices?.[PRICE_KEY(l.familyId, l.slots)]
 
   return (
     <Modal
       open={open}
       onClose={onClose}
       title={initial ? `Edit “${initial.name}”` : 'Create event'}
-      sub="General details, customisation and branding — there is no price here. Frame prices come from Organisation Defaults."
+      sub="General details, customisation and branding — there is no price here. Layout prices come from Organisation Defaults."
       width="xwide"
       footer={
         <>
@@ -659,7 +738,7 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
         </>
       }
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 22 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 22 }}>
         <div>
           <SectionLabel n={1} title="General" />
           <Field label="Event name" required>
@@ -701,13 +780,13 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
             <SectionLabel n={2} title="Customisation" />
             <label className="label">Photo filters available at this event</label>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 18 }}>
-              {FILTERS.map((f) => {
-                const sel = form.filters.includes(f.id)
+              {FILTERS.map((fl) => {
+                const sel = form.filters.includes(fl.id)
                 return (
                   <button
-                    key={f.id}
+                    key={fl.id}
                     type="button"
-                    onClick={() => toggleIn('filters', f.id)}
+                    onClick={() => toggleIn('filters', fl.id)}
                     className="row gap-8"
                     style={{
                       padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
@@ -717,85 +796,171 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
                     }}
                   >
                     <Icon name={sel ? 'check' : 'filter'} size={13} />
-                    {f.label}
+                    {fl.label}
                   </button>
                 )
               })}
             </div>
 
-            <label className="label">Templates for this event <span className="t11 muted fw400" style={{ fontWeight: 400 }}>(from all available platform templates)</span></label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              {templates.map((t) => {
-                const sel = form.templateIds.includes(t.id)
-                return (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => toggleIn('templateIds', t.id)}
-                    style={{
-                      position: 'relative', padding: 6, borderRadius: 8, cursor: 'pointer', textAlign: 'center',
-                      border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
-                      background: sel ? 'var(--hp-pink-soft)' : 'var(--surface)',
-                    }}
-                  >
-                    <FramePreview
-                      template={t.imageScope === 'general' ? { ...t, photoSlots: [] } : t}
-                      frame={{ name: 'canvas', background: { type: 'solid', colors: ['#FFFFFF'], pattern: 'none' }, text: '#3A3344' }}
-                      width={72}
-                    />
-                    <div className="t11 fw6 mt-8 ellipsis" title={t.name}>{t.name}</div>
-                    <div className="t11 faint" style={{ fontSize: 10 }}>{t.imageScope === 'general' ? 'Universal' : templateSlotsLabel(t)}</div>
-                    {sel ? (
-                      <span style={{
-                        position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
-                        background: 'var(--hp-pink)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        <Icon name="check" size={11} />
-                      </span>
-                    ) : null}
-                  </button>
-                )
-              })}
-              {templates.length === 0 ? <div className="t12 faint" style={{ gridColumn: '1/-1' }}>No active platform templates.</div> : null}
+            <div className="row between wrap gap-8" style={{ marginBottom: 8 }}>
+              <label className="label" style={{ marginBottom: 0 }}>
+                Templates available at this event
+                <span className="t11 muted" style={{ fontWeight: 400 }}> · {form.templateIds.length} of {templates.length} selected</span>
+              </label>
+              <div className="row gap-6">
+                <Button size="sm" variant="outline" icon="check" onClick={selectAllShown}>Select all shown</Button>
+                <Button size="sm" variant="ghost" icon="x" onClick={clearShown}>Clear shown</Button>
+              </div>
             </div>
+            <div className="row wrap gap-8" style={{ marginBottom: 10 }}>
+              <Select value={tf.orientation} onChange={(e) => setTf((x) => ({ ...x, orientation: e.target.value }))} style={{ width: 118, height: 32, fontSize: 12 }}>
+                <option value="">Orientation</option>
+                {ORIENTATION_OPTIONS.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </Select>
+              <Select value={tf.sheet} onChange={(e) => setTf((x) => ({ ...x, sheet: e.target.value }))} style={{ width: 96, height: 32, fontSize: 12 }}>
+                <option value="">Sheet</option>
+                {SHEET_OPTIONS.map((sh) => <option key={sh} value={sh}>{sh}</option>)}
+              </Select>
+              <Select value={tf.slots} onChange={(e) => setTf((x) => ({ ...x, slots: e.target.value }))} style={{ width: 104, height: 32, fontSize: 12 }}>
+                <option value="">Images</option>
+                {SLOT_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+              </Select>
+              <Select value={tf.category} onChange={(e) => setTf((x) => ({ ...x, category: e.target.value }))} style={{ width: 122, height: 32, fontSize: 12 }}>
+                <option value="">Category</option>
+                {TEMPLATE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </Select>
+              <span className="t11 faint">{filteredTemplates.length} shown across {groups.length} layout{groups.length === 1 ? '' : 's'}</span>
+            </div>
+
+            <div style={{ maxHeight: 420, overflowY: 'auto', border: '1px solid var(--line-soft)', borderRadius: 'var(--r-md)', padding: '10px 12px', background: 'var(--surface-2)' }}>
+              {groups.map(({ layout, list }) => (
+                <div key={layout.id} style={{ marginBottom: 12 }}>
+                  <div className="row between wrap gap-8" style={{ padding: '4px 2px 6px' }}>
+                    <span className="t12 fw6">
+                      {layout.name}
+                      <span className="t11 muted fw400" style={{ fontWeight: 400 }}> · {layoutLabel(layout)}</span>
+                    </span>
+                    <span className="chip chip-info" style={{ height: 19, fontSize: 10.5 }} title="Guest price from Organisation Defaults">
+                      {priceFor(layout) != null ? `₹${priceFor(layout)}/print` : 'not priced'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 8 }}>
+                    {list.map((t) => {
+                      const sel = form.templateIds.includes(t.id)
+                      const a = layout.canvas.w / layout.canvas.h
+                      const pw = a < 0.45 ? 52 : a < 1 ? 84 : 108
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => toggleTemplate(t.id)}
+                          title={`${t.name} — ${t.category}`}
+                          style={{
+                            position: 'relative', padding: 6, borderRadius: 8, cursor: 'pointer', textAlign: 'center',
+                            border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
+                            background: sel ? 'var(--hp-pink-soft)' : 'var(--surface)',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'center', opacity: sel ? 1 : 0.75 }}>
+                            <TemplatePreview template={t} width={pw} />
+                          </div>
+                          <div className="t11 fw6 mt-8 ellipsis" style={{ fontSize: 10.5 }} title={t.name}>{t.name}</div>
+                          <div className="t11 faint" style={{ fontSize: 9 }}>{t.source === 'designer' ? 'Designer' : t.source === 'ai_generated' ? 'AI' : 'Playground'}</div>
+                          {sel ? (
+                            <span style={{
+                              position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: '50%',
+                              background: 'var(--hp-pink)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <Icon name="check" size={11} />
+                            </span>
+                          ) : null}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+              {groups.length === 0 ? (
+                <div className="t12 faint" style={{ padding: '14px 4px' }}>
+                  No published templates match these filters — widen them, or ask the platform to publish more.
+                </div>
+              ) : null}
+            </div>
+            <p className="t11 faint mt-8" style={{ lineHeight: 1.5 }}>
+              Templates are pinned to one layout variant each ({LAYOUTS.length} exist — both orientations). At the booth,
+              guests filter by orientation and image count, see your page-size prices, then pick from the templates this
+              event offers.
+            </p>
           </div>
         </div>
 
         <div>
           <SectionLabel n={3} title="Branding" />
-          <Field label="Client logo" hint="Default: none. If added, it appears in the 15% footer of every print.">
-            {form.logoUrl ? (
-              <div className="row gap-12" style={{ alignItems: 'center' }}>
-                <img src={form.logoUrl} alt="Logo" style={{ height: 52, borderRadius: 8, border: '1px solid var(--line)', objectFit: 'contain', background: 'var(--surface)' }} />
-                <Button size="sm" variant="ghost" icon="trash" onClick={() => set('logoUrl', null)} style={{ color: 'var(--danger)' }}>Remove</Button>
+          <Field
+            label="Event logos — sponsors, host, venue, teams"
+            hint="Optional, up to 15. These are NOT your organisation logo — they are the extra layer of personalisation for this event (like BMW, Audi and Ferrari logos at a car race). Each template places them at its reserved footer positions."
+          >
+            <div
+              style={{
+                border: '2px dashed var(--line)', borderRadius: 10, padding: 14, textAlign: 'center',
+                cursor: 'pointer', position: 'relative', background: 'var(--surface-2)',
+              }}
+            >
+              <input type="file" accept="image/png, image/jpeg, image/svg+xml" multiple onChange={addLogos} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
+              <Icon name="upload" size={20} style={{ color: 'var(--faint)' }} />
+              <div className="t12 muted mt-8">Click to add logos — or leave blank ({form.logos.length}/15)</div>
+            </div>
+            {form.logos.length > 0 ? (
+              <div className="row wrap gap-8 mt-12">
+                {form.logos.map((src, i) => (
+                  <span key={i} style={{ position: 'relative', display: 'inline-flex' }}>
+                    <img
+                      src={src}
+                      alt={`Logo ${i + 1}`}
+                      style={{ width: 44, height: 44, objectFit: 'contain', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--surface)' }}
+                    />
+                    <button
+                      type="button"
+                      title="Remove logo"
+                      onClick={() => set('logos', form.logos.filter((_, j) => j !== i))}
+                      style={{
+                        position: 'absolute', top: -6, right: -6, width: 18, height: 18, borderRadius: '50%',
+                        background: 'var(--danger)', color: '#fff', border: 'none', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}
+                    >
+                      <Icon name="x" size={10} />
+                    </button>
+                  </span>
+                ))}
               </div>
-            ) : (
-              <div style={{ border: '2px dashed var(--line)', borderRadius: 10, padding: 16, textAlign: 'center', cursor: 'pointer', position: 'relative', background: 'var(--surface-2)' }}>
-                <input type="file" accept="image/png, image/jpeg" onChange={onLogoFile} style={{ position: 'absolute', inset: 0, opacity: 0, cursor: 'pointer' }} />
-                <Icon name="upload" size={22} style={{ color: 'var(--faint)' }} />
-                <div className="t12 muted mt-8">Click to upload a logo — or leave as none</div>
-              </div>
-            )}
+            ) : null}
           </Field>
-          <Field label="Default tagline" hint="Shown in the print footer under/beside the logo. Editable any time from this screen.">
+          <Field label="Default tagline" hint="Shown in the print footer beside the logos. Editable any time from this screen.">
             <TextInput value={form.tagline} onChange={(e) => set('tagline', e.target.value)} placeholder="e.g. Shubh Vivah — Kapoor & Verma" />
           </Field>
 
           <div className="mt-16">
             <label className="label">Output preview</label>
-            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-              <FramePreview
-                template={previewTemplate || templates[0] || null}
-                frame={previewFrame}
-                branding={{ logoUrl: form.logoUrl, tagline: form.tagline }}
-                width={150}
-              />
-              <div className="t11 muted" style={{ maxWidth: 200, lineHeight: 1.5 }}>
-                Prints this event will use: <b>{form.templateIds.length > 0 ? `${form.templateIds.length} selected template(s)` : 'the default platform template'}</b> on{' '}
-                <b>{previewFrame.name}</b> (plus {allowedFrames.length - 1 > 0 ? `the other ${allowedFrames.length - 1} booth-allowed frame(s)` : 'no other frame'}).
-                The frame's price is set in Organisation Defaults — never here.
+            {previewTemplate ? (
+              <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+                <div style={{ background: 'var(--surface-2)', border: '1px solid var(--line)', borderRadius: 'var(--r-md)', padding: 10, display: 'flex', justifyContent: 'center' }}>
+                  <TemplatePreview
+                    template={previewTemplate}
+                    width={layoutById(previewTemplate.layoutId)?.canvas.w / layoutById(previewTemplate.layoutId)?.canvas.h < 0.45 ? 96 : layoutById(previewTemplate.layoutId)?.canvas.w / layoutById(previewTemplate.layoutId)?.canvas.h < 1 ? 150 : 210}
+                    logos={form.logos.map((src, i) => ({ src, name: `Logo ${i + 1}` }))}
+                    tagline={form.tagline}
+                  />
+                </div>
+                <div className="t11 muted" style={{ maxWidth: 190, lineHeight: 1.55 }}>
+                  Previewing <b>{previewTemplate.name}</b> ({layoutShortLabel(layoutById(previewTemplate.layoutId))}). Guests pay{' '}
+                  <b>{priceFor(layoutById(previewTemplate.layoutId)) != null ? `₹${priceFor(layoutById(previewTemplate.layoutId))}` : 'no price set'}</b> for
+                  this layout — set in Organisation Defaults, never here. <b>{form.templateIds.length}</b> template(s) available at this event.
+                </div>
               </div>
-            </div>
+            ) : (
+              <p className="t12 faint">Select at least one template to preview the output.</p>
+            )}
           </div>
         </div>
       </div>

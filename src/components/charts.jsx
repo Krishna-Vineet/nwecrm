@@ -117,7 +117,7 @@ export function LineChart({ data, height = 210, color = 'var(--hp-pink)', format
       <path d={line} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
       {pts.map((p, i) => (
         <g key={i}>
-          <circle cx={p[0]} cy={p[1]} r="3.4" fill="#fff" stroke={color} strokeWidth="2">
+          <circle cx={p[0]} cy={p[1]} r="3.4" fill="var(--surface)" stroke={color} strokeWidth="2">
             <title>{`${data[i].label}: ${formatValue(data[i].value)}`}</title>
           </circle>
           {(n <= 12 || i % Math.ceil(n / 12) === 0) && (

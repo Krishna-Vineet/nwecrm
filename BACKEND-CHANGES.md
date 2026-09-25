@@ -456,3 +456,112 @@ session: {
   and stores the snapshot immutably on the ticket.
 - The org reads it back on `GET /api/org/tickets/:id` as `ticket.session` — the
   CRM renders it as the read-only "Booth session" card in the ticket drawer.
+
+## 5. Layout system & Template Library (this round — mock implements all of these)
+
+The frame catalogue is **fully retired**. Templates are now anchored to a
+shared **layout system**, and the platform's creation surface is the
+**Template Library**.
+
+### 5.1 The layout system (contract data)
+
+Shared between CRM and booth app as `src/lib/layouts.js` (server-side it is
+`require`d / bundled — it is plain data + pure functions):
+
+- **16 layout families** (cut size | print sheet | image-slot counts), e.g.
+  `Pocket Polaroid 46-23 (2×3 from 4×6, [1])`, `Classic Duo Strip 46-26
+  (2×6 from 4×6, [3,4])`, … `Quad Strip Reel 812-68 (2×6 from 8×12, [3,4])`.
+- Each `(family, slotCount)` pair is a **layout variant** with id
+  `` `${familyId}-${'v'|'h'}${slots}` `` — **76 variants total** (portrait +
+  landscape where the cut allows). Guests group/filter by orientation, cut
+  dimension, image count and sheet size.
+- Geometry helper `slotsForLayout(id)` → `{ canvas, photoSlots[], footer }`
+  in layout units (250 px/inch); the **footer (bottom 15%) is reserved for
+  the event's branding logos + tagline**.
+- `PRICE_KEY(familyId, slots)` (`"57:3"`) and a `suggestedPriceMap()` are the
+  single pricing namespace for guest-facing print prices.
+
+### 5.2 Templates (breaking changes)
+
+- Template documents lose `imageScope / orientation / slotCount /
+  photoSlots / canvas / defaultPrice` and gain:
+```
+{
+  id, name, description, category,
+  layoutId: "57-v3",            // REQUIRED — the pinned layout variant
+  componentId: "RoyalWedding",  // designer templates only (code registry)
+  design: {                     // playground/AI templates only
+    bg: { type: "gradient"|"solid"|"image", colors?, url? },
+    accent, textColor, ornament, font, slotShape, titleBand, title, tagline
+  },
+  source: "designer" | "playground" | "ai_generated",
+  active: true,                 // publish gate — see 5.4
+  usage: 87                     // sessions rendered (display only)
+}
+```
+- Seeds: **14 designer** (hand-written components in `src/templates/designer/*`),
+  **2 AI-config** (`design` with generated SVG background art) and
+  **1 playground** template.
+- `GET /api/platform/templates` → `{ templates: [...] }`, each row enriched
+  with `layout: { code, name, orientation, slots, sheets, canvas }`.
+
+### 5.3 Template endpoints (replace the old Architecture-V1 ones)
+
+| Method & path | Perm | Notes |
+|---|---|---|
+| `GET /api/platform/templates` | templates.use | orgs may read (event picker) |
+| `POST /api/platform/templates` | templates.manage | body `{ name, layoutId!, category?, description?, design? }` → 201 `source:"playground"`, `active:true` |
+| `POST /api/platform/templates/ai-generate` | templates.manage | `{ prompt, layoutId }` → `{ draft }` (deterministic palette + AI background, **nothing persisted**) |
+| `PUT /api/platform/templates/:id` | templates.manage | partial; `layoutId` change → **409** if any event uses the template; publish/unpublish audited |
+| `DELETE /api/platform/templates/:id` | templates.manage | **409** for `source:"designer"` or event-used; otherwise 200 |
+
+Validation: `layoutId` must resolve to a real variant (400 otherwise).
+Audit actions: `platform.template.created / published / unpublished /
+updated / deleted`.
+
+### 5.4 Publish gate (platform → org availability)
+
+- A template with `active:false` is invisible/unusable for orgs.
+- `POST /api/org/events` and `PUT /api/org/events/:id` reject any
+  `templateIds[]` entry that is unknown **or** `active:false` (400).
+- The CRM's Template Library page exposes a Published/Hidden toggle per
+  template; designer templates can only be published/unpublished, never
+  edited or deleted.
+
+### 5.5 Organisation Defaults — layout pricing (replaces frame pricing)
+
+`GET/PUT /api/org/defaults` now carry **`layoutPrices`** instead of `frames`:
+
+```
+layoutPrices: { "46:1": 30, "46:4": 40, "57:1": 70, "57:3": 90, ... }
+// key = PRICE_KEY(familyId, slotCount) → guest price in ₹
+```
+
+- `GET` returns the **full map**: server-suggested prices overlaid with the
+  org's saved overrides (every family×slot iteration the org could offer).
+- `PUT` accepts a **partial** map; each key is validated against
+  `LAYOUT_FAMILIES` (family exists + slot count offered) and each price must
+  be a finite number 0–100000 (400 otherwise). Unmentioned keys keep their
+  current values.
+- An iteration **without a price is not offered at the org's booths** —
+  clearing the input hides the layout from guests. Prices never live on
+  events.
+
+### 5.6 Event branding — sponsor/host/venue logos (0–15, optional)
+
+Event create/update accept `branding.logos: string[]` (data-URIs / URLs) —
+**not** the organisation logo. They are the extra personalisation layer
+(sponsors, host, venue, player teams — the "BMW/Audi/Ferrari at a race"
+case) that each template places at its reserved footer positions.
+
+- 0 logos is valid (blank); >15 → **400** ("A maximum of 15 logos per
+  event"); non-string entries are filtered.
+- Legacy `branding.logoUrl` is still accepted and normalised to
+  `logos[0]`; responses always use `branding.logos`.
+- `branding.tagline` renders beside the logos in the print footer.
+
+### 5.7 Booth ticket session package
+
+`session.package` becomes `{ templateId, templateName, layout, prints,
+digitalCopy }` — the server resolves `templateName` and echoes `layout`
+(e.g. `"4×6 · 1"`) as an immutable display snapshot.

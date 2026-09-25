@@ -31,9 +31,6 @@ export const api = {
     updateTemplate: (id, body) => request('PUT', `platform/templates/${id}`, body),
     deleteTemplate: (id) => request('DELETE', `platform/templates/${id}`),
     generateTemplateAI: (body) => request('POST', 'platform/templates/ai-generate', body),
-    frames: () => request('GET', 'platform/frames'),
-    createFrame: (body) => request('POST', 'platform/frames', body),
-    deleteFrame: (id) => request('DELETE', `platform/frames/${id}`),
   },
   org: {
     dashboard: () => request('GET', 'org/dashboard'),
