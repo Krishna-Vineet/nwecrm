@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext.jsx'
 import { api } from '../api/index.js'
 import { BrandMark, Wordmark } from '../components/Logo.jsx'
 import { Icon } from '../lib/icons.jsx'
-import { Field, TextInput, Button, Spinner } from '../components/ui.jsx'
+import { Field, TextInput, PasswordInput, Button, Spinner, Modal, ThemeToggle, WarnBanner } from '../components/ui.jsx'
 import { ROLES, ROLE_LABELS } from '../lib/roles.js'
 
 const DEMO_ACCOUNTS = [
@@ -15,11 +15,12 @@ const DEMO_ACCOUNTS = [
 ]
 
 export default function Login() {
-  const { login, useMock } = useApp()
+  const { login, useMock, theme, toggleTheme } = useApp()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [forgotOpen, setForgotOpen] = useState(false)
 
   const doLogin = async (em, pw) => {
     setBusy(true)
@@ -46,6 +47,8 @@ export default function Login() {
 
   return (
     <div className="login-wrap">
+      <ThemeToggle floating theme={theme} onToggle={toggleTheme} />
+
       <div className="login-brand">
         <div className="row gap-12" style={{ position: 'relative', zIndex: 2 }}>
           <BrandMark size={44} onDark />
@@ -90,10 +93,12 @@ export default function Login() {
               <TextInput type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
             </Field>
             <Field label="Password" required error={error || undefined}>
-              <TextInput type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              <PasswordInput placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
             </Field>
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-              <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--hp-pink-deep)' }}>Forgot password?</button>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--hp-pink-deep)' }} onClick={() => setForgotOpen(true)}>
+                Forgot password?
+              </button>
             </div>
             <Button type="submit" variant="primary" size="lg" style={{ width: '100%' }} disabled={busy}>
               {busy ? <Spinner small /> : <Icon name="arrow-up-right" size={16} />}
@@ -130,6 +135,157 @@ export default function Login() {
           )}
         </div>
       </div>
+
+      <ForgotPasswordModal open={forgotOpen} onClose={() => setForgotOpen(false)} />
     </div>
+  )
+}
+
+// ---------------- Forgot password (OTP-style, 3 steps) ----------------
+// 1. Email → server issues a 6-digit code (demo shows it; production emails/SMSes it)
+// 2. Code + new password → verified and set
+// 3. Success → back to sign in
+
+function ForgotPasswordModal({ open, onClose }) {
+  const { toast, useMock } = useApp()
+  const [step, setStep] = useState('email') // email | reset | done
+  const [email, setEmail] = useState('')
+  const [code, setCode] = useState('')
+  const [pw, setPw] = useState('')
+  const [cf, setCf] = useState('')
+  const [devCode, setDevCode] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const reset = () => {
+    setStep('email'); setEmail(''); setCode(''); setPw(''); setCf(''); setDevCode(null); setError('')
+  }
+
+  const close = () => {
+    onClose()
+    setTimeout(reset, 200)
+  }
+
+  const requestCode = async (e) => {
+    e?.preventDefault()
+    if (!email.trim()) return setError('Enter the email on your HappyPix account.')
+    setBusy(true)
+    setError('')
+    try {
+      const r = await api.auth.forgotPassword(email.trim())
+      setDevCode(r.code || null)
+      setStep('reset')
+      toast('Reset code issued — valid for 10 minutes', 'info')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doReset = async (e) => {
+    e.preventDefault()
+    if (!/^\d{6}$/.test(code.trim())) return setError('Enter the 6-digit code.')
+    if (pw.length < 6) return setError('New password must be at least 6 characters.')
+    if (pw !== cf) return setError('New passwords do not match.')
+    setBusy(true)
+    setError('')
+    try {
+      await api.auth.resetPassword(email.trim(), code.trim(), pw)
+      setStep('done')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={close}
+      title={step === 'done' ? 'Password updated' : 'Reset your password'}
+      sub={
+        step === 'email' ? 'We will send a 6-digit reset code to your registered email.'
+        : step === 'reset' ? `Enter the code we sent to ${email}.`
+        : undefined
+      }
+      footer={
+        step === 'done' ? (
+          <Button variant="primary" onClick={close}>Back to sign in</Button>
+        ) : step === 'email' ? (
+          <>
+            <Button variant="ghost" onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={requestCode} disabled={busy || !email.trim()}>
+              {busy ? 'Sending…' : 'Send reset code'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="ghost" onClick={() => { setStep('email'); setCode(''); setPw(''); setCf(''); setError('') }} disabled={busy}>
+              Change email
+            </Button>
+            <Button variant="primary" onClick={doReset} disabled={busy || !code || !pw || !cf}>
+              {busy ? 'Updating…' : 'Set new password'}
+            </Button>
+          </>
+        )
+      }
+    >
+      {step === 'email' && (
+        <form onSubmit={requestCode}>
+          <Field label="Registered email address" required>
+            <TextInput type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} autoFocus autoComplete="email" />
+          </Field>
+          {error ? <div className="input-error" style={{ marginTop: -6 }}>{error}</div> : null}
+          <p className="t11 faint mt-8">The code is valid for 10 minutes and can be used once.</p>
+          <button type="submit" hidden />
+        </form>
+      )}
+
+      {step === 'reset' && (
+        <form onSubmit={doReset}>
+          {devCode && useMock ? (
+            <div style={{ marginBottom: 16 }}>
+              <WarnBanner tone="info" icon="info">
+                <span>
+                  <b>Demo mode:</b> no email server here, so your reset code is <b className="num" style={{ fontSize: 15, letterSpacing: '0.14em' }}>{devCode}</b>.
+                  In production this arrives by email/SMS.
+                </span>
+              </WarnBanner>
+            </div>
+          ) : null}
+          <Field label="6-digit reset code" required>
+            <TextInput
+              inputMode="numeric"
+              placeholder="••••••"
+              maxLength={6}
+              className="num"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              style={{ fontSize: 18, letterSpacing: '0.4em', textAlign: 'center', fontWeight: 700 }}
+              autoFocus
+            />
+          </Field>
+          <Field label="New password" required hint="Minimum 6 characters.">
+            <PasswordInput placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+          </Field>
+          <Field label="Confirm new password" required error={error || undefined}>
+            <PasswordInput placeholder="Repeat new password" value={cf} onChange={(e) => setCf(e.target.value)} autoComplete="new-password" />
+          </Field>
+          <button type="submit" hidden />
+        </form>
+      )}
+
+      {step === 'done' && (
+        <div style={{ textAlign: 'center', padding: '10px 0 4px' }}>
+          <span className="stat-ico" style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--hp-green-soft)', color: 'var(--hp-green-ink)', margin: '0 auto 12px' }}>
+            <Icon name="check-circle" size={26} />
+          </span>
+          <p className="t13" style={{ fontWeight: 640 }}>Your password has been changed.</p>
+          <p className="t12 muted" style={{ marginTop: 4 }}>Sign in with your email and the new password.</p>
+        </div>
+      )}
+    </Modal>
   )
 }

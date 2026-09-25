@@ -232,6 +232,39 @@ export function handle(method, path, body, token) {
       authed()
       return { status: 200, data: { user: userPublic(user) } }
     }
+    if (p2 === 'forgot-password' && method === 'POST') {
+      // Public. Always 200 — never reveal whether the account exists.
+      // Demo mode: the 6-digit code is returned as `code` because there is
+      // no email/SMS server in the sandbox; the real backend sends it via
+      // email/SMS instead (see BACKEND-CHANGES.md).
+      const email = String((body && body.email) || '').trim().toLowerCase()
+      const u = db.users.find((x) => x.email.toLowerCase() === email)
+      if (u && u.status === 'active') {
+        const code = String(Math.floor(100000 + Math.random() * 900000))
+        u.resetCode = code
+        u.resetCodeExpiry = new Date(NOW().getTime() + 10 * 60 * 1000).toISOString()
+        logAudit(db, { actorId: u.id, action: 'platform.auth.forgot_password', entity: 'user', summary: `Password reset code issued for ${u.name}`, severity: 'warn', organizationId: u.organizationId })
+        persist()
+        return { status: 200, data: { ok: true, delivery: 'demo', code } }
+      }
+      return { status: 200, data: { ok: true, delivery: 'email' } }
+    }
+    if (p2 === 'reset-password' && method === 'POST') {
+      // Public. Email + 6-digit code + new password.
+      const email = String((body && body.email) || '').trim().toLowerCase()
+      const code = String((body && body.code) || '').trim()
+      const newPassword = String((body && body.newPassword) || '')
+      const u = db.users.find((x) => x.email.toLowerCase() === email)
+      if (!u || !u.resetCode || u.resetCode !== code) throw new ApiError(400, 'Invalid or expired reset code.')
+      if (!u.resetCodeExpiry || new Date(u.resetCodeExpiry) < NOW()) throw new ApiError(400, 'This reset code has expired. Request a new one.')
+      if (newPassword.length < 6) throw new ApiError(400, 'New password must be at least 6 characters.')
+      u.password = newPassword
+      u.resetCode = null
+      u.resetCodeExpiry = null
+      logAudit(db, { actorId: u.id, action: 'platform.auth.password_reset', entity: 'user', summary: `${u.name} reset their password via forgot-password`, severity: 'warn', organizationId: u.organizationId })
+      persist()
+      return { status: 200, data: { ok: true } }
+    }
     if (p2 === 'profile' && method === 'PUT') {
       authed(PERMS.PROFILE_EDIT)
       if (body.name) user.name = String(body.name).trim()
@@ -247,6 +280,70 @@ export function handle(method, path, body, token) {
       logAudit(db, { actorId: user.id, action: 'platform.auth.password_change', entity: 'user', summary: `${user.name} changed their password`, organizationId: user.organizationId })
       persist()
       return { status: 200, data: { ok: true } }
+    }
+  }
+
+  // ================= BOOTH (device-facing; the booth app pushes here) =================
+  // The booth authenticates with its generated device UUID (it is not a
+  // CRM user). The real backend implements the same contract.
+  if (p === 'booth') {
+    if (p2 === 'devices' && p3 && parts[3] === 'telemetry' && method === 'POST') {
+      // Hardware heartbeat from the booth app:
+      //   { printsTotal, shutterCount, batteryPct }
+      // The CRM reads this back through GET /org/devices (Hardware column).
+      const d = db.devices.find((x) => x.deviceUuid === p3)
+      if (!d) throw new ApiError(404, 'Device not found.')
+      const clampInt = (v, min, max) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)))
+      const prev = d.telemetry || {}
+      const tel = {
+        prints: body && body.printsTotal != null ? clampInt(body.printsTotal, 0, 10_000_000) : prev.prints || 0,
+        shutters: body && body.shutterCount != null ? clampInt(body.shutterCount, 0, 10_000_000) : prev.shutters || 0,
+        batteryPct: body && body.batteryPct != null ? clampInt(body.batteryPct, 0, 100) : prev.batteryPct ?? null,
+        updatedAt: NOW().toISOString(),
+      }
+      d.telemetry = tel
+      d.lastSeenAt = tel.updatedAt
+      persist()
+      return { status: 200, data: { ok: true, telemetry: tel } }
+    }
+    if (p2 === 'tickets' && !p3 && method === 'POST') {
+      // Guest support ticket raised by the booth app at session end / after
+      // payment. The booth collects the guest's phone number and attaches
+      // the whole session: slot, camera clicks, customisations, payment.
+      // Body: { organizationId, eventId, deviceId, subject, category,
+      //         priority, guestName, guestPhone, message, session }
+      const { organizationId, eventId, deviceId, subject, session } = body || {}
+      const org = db.organisations.find((o) => o.id === organizationId)
+      if (!org) throw new ApiError(400, 'organizationId is required.')
+      if (!subject || !String(subject).trim()) throw new ApiError(400, 'Subject is required.')
+      if (!session || !session.phone) throw new ApiError(400, 'Session context with the guest phone number is required.')
+      const t = {
+        id: uid('tix'),
+        organizationId,
+        eventId: eventId || null,
+        deviceId: deviceId || null,
+        subject: String(subject).trim(),
+        category: ['device', 'payment', 'photo', 'event', 'general'].includes(body.category) ? body.category : 'general',
+        priority: ['low', 'medium', 'high', 'urgent'].includes(body.priority) ? body.priority : 'medium',
+        status: 'open',
+        guest: { name: (body.guestName || 'Guest').trim(), contact: String(session.phone).trim() },
+        session: {
+          ...session,
+          // snapshot ids resolved for display by withTicketRefs
+          eventId: eventId || null,
+          deviceId: deviceId || null,
+        },
+        createdAt: NOW().toISOString(),
+        updatedAt: NOW().toISOString(),
+        messages: [
+          { id: uid('m'), author: 'Guest (booth)', at: NOW().toISOString(), text: String(body.message || subject).trim() },
+        ],
+        resolution: null,
+      }
+      db.tickets.unshift(t)
+      logAudit(db, { actorId: null, action: 'ticket.created_from_booth', entity: 'ticket', summary: `Ticket “${t.subject}” raised from booth (session ${session.id || 'n/a'})`, organizationId })
+      persist()
+      return { status: 201, data: { ticket: withTicketRefs(t) } }
     }
   }
 
@@ -804,6 +901,39 @@ export function handle(method, path, body, token) {
         })
         return { status: 200, data: { devices, limit: { used: devices.length, allowed: ps.deviceLimit }, canRegister: !orgPlanBlocked && devices.length < ps.deviceLimit } }
       }
+      if (p3 && method === 'PUT') {
+        // Rename a device and/or set the on-ground booth operator
+        // (name + phone). Org Admin AND Org Manager may both do this —
+        // whoever assigns an operator records the contact here so the
+        // rest of the team knows who is standing at the booth.
+        authed(PERMS.EVENTS_DEVICES_MANAGE)
+        const d = db.devices.find((x) => x.id === p3 && x.organizationId === orgId)
+        if (!d) throw new ApiError(404, 'Device not found.')
+        const changes = []
+        if (body && body.deviceName != null) {
+          const name = String(body.deviceName).trim()
+          if (!name) throw new ApiError(400, 'Device name cannot be empty.')
+          if (name !== d.deviceName) { changes.push(`renamed “${d.deviceName}” → “${name}”`); d.deviceName = name }
+        }
+        if (body && body.operatorName !== undefined) {
+          const v = String(body.operatorName || '').trim() || null
+          if (v && !d.operatorName) changes.push(`operator ${v} assigned`)
+          else if (!v && d.operatorName) changes.push(`operator ${d.operatorName} removed`)
+          else if (v && v !== d.operatorName) changes.push(`operator changed to ${v}`)
+          d.operatorName = v
+        }
+        if (body && body.operatorPhone !== undefined) {
+          const v = String(body.operatorPhone || '').trim() || null
+          if (v && v.length > 20) throw new ApiError(400, 'Phone number looks too long.')
+          d.operatorPhone = v
+        }
+        if (changes.length) {
+          logAudit(db, { actorId: u.id, action: 'device.updated', entity: 'device', summary: `${d.deviceName}: ${changes.join(', ')}`, organizationId: orgId })
+          persist()
+        }
+        const ev = d.assignedEventId ? db.events.find((e) => e.id === d.assignedEventId) : null
+        return { status: 200, data: { device: { ...d, online: computeDeviceOnline(d), assignedEvent: ev ? { id: ev.id, name: ev.name, status: computeEventStatus(ev) } : null } } }
+      }
     }
     if (p2 === 'devices' && p3 && parts[3] === 'assign' && method === 'POST') {
       authed(PERMS.EVENTS_DEVICES_MANAGE)
@@ -1086,10 +1216,26 @@ export function handle(method, path, body, token) {
   function withTicketRefs(t) {
     const ev = t.eventId ? db.events.find((e) => e.id === t.eventId) : null
     const dev = t.deviceId ? db.devices.find((d) => d.id === t.deviceId) : null
+    // Resolve booth-session ids (template, event, device) into display names.
+    let session = t.session || null
+    if (session) {
+      const pkg = session.package || {}
+      const tpl = pkg.templateId ? db.templates.find((x) => x.id === pkg.templateId) : null
+      session = {
+        ...session,
+        event: ev ? { id: ev.id, name: ev.name } : null,
+        device: dev ? { id: dev.id, name: dev.deviceName } : null,
+        package: {
+          ...pkg,
+          templateName: pkg.templateName || (tpl ? tpl.name : pkg.template) || null,
+        },
+      }
+    }
     return {
       ...t,
       event: ev ? { id: ev.id, name: ev.name } : null,
       device: dev ? { id: dev.id, name: dev.deviceName } : null,
+      session,
     }
   }
 }

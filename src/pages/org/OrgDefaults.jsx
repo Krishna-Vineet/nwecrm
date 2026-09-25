@@ -132,7 +132,7 @@ export default function OrgDefaults() {
           <div style={{ padding: '18px 20px' }}>
             <div className="row gap-16 mb-16" style={{ alignItems: 'center' }}>
               {d.logoUrl ? (
-                <img src={d.logoUrl} alt="logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: '#fff' }} />
+                <img src={d.logoUrl} alt="logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface)' }} />
               ) : (
                 <span className="stat-ico" style={{ width: 64, height: 64, borderRadius: 14, background: 'var(--hp-pink-soft)', color: 'var(--hp-pink)', flex: 'none' }}>
                   <Icon name="camera" size={28} />
@@ -186,7 +186,7 @@ export default function OrgDefaults() {
                     style={{
                       padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       border: `1.5px solid ${Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink)' : 'var(--line)'}`,
-                      background: Number(d.boothTimeoutSec) === p.value ? 'rgba(234,9,127,0.07)' : 'var(--surface)',
+                      background: Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink-soft)' : 'var(--surface)',
                       color: Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink-deep)' : 'var(--ink-2)',
                     }}
                   >

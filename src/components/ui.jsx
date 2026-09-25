@@ -1,6 +1,6 @@
 // Shared UI primitives.
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Icon from '../lib/icons.jsx'
 import { initials, avatarColor } from '../lib/format.js'
 
@@ -113,6 +113,60 @@ export function Select({ children, ...props }) {
     <select className="select" {...props}>
       {children}
     </select>
+  )
+}
+
+// Password field with a show/hide (eye) toggle.
+export function PasswordInput({ style, ...props }) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="pw-wrap" style={style}>
+      <input className="input" type={show ? 'text' : 'password'} {...props} />
+      <button
+        type="button"
+        className="pw-eye"
+        onClick={() => setShow((s) => !s)}
+        title={show ? 'Hide password' : 'Show password'}
+        aria-label={show ? 'Hide password' : 'Show password'}
+        tabIndex={-1}
+      >
+        <Icon name={show ? 'eye-off' : 'eye'} size={16} />
+      </button>
+    </div>
+  )
+}
+
+// Light / dark switch — icon pill (floating on Login, inline in Profile).
+export function ThemeToggle({ theme, onToggle, floating = false, style }) {
+  const dark = theme === 'dark'
+  return (
+    <button
+      type="button"
+      className={`theme-btn${floating ? ' float' : ''}`}
+      onClick={onToggle}
+      title={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      aria-label={dark ? 'Switch to light theme' : 'Switch to dark theme'}
+      style={style}
+    >
+      <Icon name={dark ? 'sun' : 'moon'} size={floating ? 18 : 16} />
+      {!floating ? <span className="t12 fw6">{dark ? 'Light mode' : 'Dark mode'}</span> : null}
+    </button>
+  )
+}
+
+// Light/Dark segmented control (Profile → Appearance).
+export function ThemeSegmented({ theme, onChange }) {
+  return (
+    <div className="theme-seg" role="group" aria-label="Colour theme">
+      {[
+        { id: 'light', label: 'Light', icon: 'sun' },
+        { id: 'dark', label: 'Dark', icon: 'moon' },
+      ].map((o) => (
+        <button key={o.id} type="button" className={theme === o.id ? 'on' : ''} onClick={() => onChange(o.id)}>
+          <Icon name={o.icon} size={14} /> {o.label}
+        </button>
+      ))}
+    </div>
   )
 }
 

@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api } from '../api/index.js'
 import { getToken, getUser, setSession, clearSession, USE_MOCK } from '../api/client.js'
 import { landingPath } from '../lib/roles.js'
+import { initialTheme, applyTheme } from '../lib/theme.js'
 import Icon from '../lib/icons.jsx'
 
 const Ctx = createContext(null)
@@ -15,7 +16,15 @@ export function useApp() {
 export function AppProvider({ children }) {
   const [user, setUser] = useState(() => getUser())
   const [toasts, setToasts] = useState([])
+  const [theme, setThemeState] = useState(initialTheme)
   const idRef = useRef(0)
+
+  // Apply the chosen theme to <html> + persist it (Login / Profile toggles).
+  useEffect(() => { applyTheme(theme) }, [theme])
+
+  const toggleTheme = useCallback(() => {
+    setThemeState((t) => (t === 'dark' ? 'light' : 'dark'))
+  }, [])
 
   const toast = useCallback((message, type = 'success', ms = 3400) => {
     const id = ++idRef.current
@@ -63,8 +72,10 @@ export function AppProvider({ children }) {
       toast,
       useMock: USE_MOCK,
       landing: user ? landingPath(user.role) : '/login',
+      theme,
+      toggleTheme,
     }),
-    [user, login, logout, updateUser, toast]
+    [user, login, logout, updateUser, toast, theme, toggleTheme]
   )
 
   return (

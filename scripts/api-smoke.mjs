@@ -162,6 +162,58 @@ check('PUT unknown frameId → 400', call('PUT', '/api/org/defaults', { frames: 
 check('org admin on platform orgs → 403', call('GET', '/api/platform/organisations', null, sana).status === 403)
 check('platform admin on org events → 403 (org scope)', call('GET', '/api/org/events', null, pa).status === 403)
 
+// ---------------- Devices: rename + booth operator (v2.1) ----------------
+r = call('GET', '/api/org/devices', null, rohit)
+const devId = r.data?.devices?.[0]?.id
+check('GET devices (org manager) → 200 with operator + telemetry fields', r.status === 200 && r.data.devices.every((d) => 'operatorName' in d && 'telemetry' in d))
+
+r = call('PUT', `/api/org/devices/${devId}`, { deviceName: 'Booth 01 — Renamed', operatorName: 'Ramesh Test', operatorPhone: '+91 90000 00000' }, rohit)
+check('PUT device rename + operator (org manager) → 200', r.status === 200 && r.data?.device?.deviceName === 'Booth 01 — Renamed' && r.data?.device?.operatorName === 'Ramesh Test')
+check('PUT device empty name → 400', call('PUT', `/api/org/devices/${devId}`, { deviceName: '  ' }, rohit).status === 400)
+check('PUT device (platform owner) → 403 org scope', call('PUT', `/api/org/devices/${devId}`, { deviceName: 'X' }, owner).status === 403)
+r = call('PUT', `/api/org/devices/${devId}`, { deviceName: 'Booth 01 — Main Hall', operatorName: null, operatorPhone: null }, sana)
+check('PUT device operator cleared by org admin → 200', r.status === 200 && r.data?.device?.operatorName === null)
+
+// ---------------- Booth telemetry push (v2.1) ----------------
+const dev = call('GET', '/api/org/devices', null, sana).data.devices[0]
+r = call('POST', `/api/booth/devices/${dev.deviceUuid}/telemetry`, { printsTotal: 999, shutterCount: 2001, batteryPct: 55 }, null)
+check('POST booth telemetry (public, uuid) → 200', r.status === 200 && r.data?.telemetry?.prints === 999 && r.data?.telemetry?.batteryPct === 55)
+check('POST booth telemetry unknown uuid → 404', call('POST', '/api/booth/devices/nope/telemetry', { printsTotal: 1 }, null).status === 404)
+r = call('GET', '/api/org/devices', null, sana)
+check('telemetry visible to CRM via org devices', r.data?.devices?.find((d) => d.id === dev.id)?.telemetry?.prints === 999)
+
+// ---------------- Forgot / reset password (OTP-style, v2.1) ----------------
+r = call('POST', '/api/auth/forgot-password', { email: 'rohit@sunsetweddings.com' }, null)
+const fpCode = r.data?.code
+check('forgot-password → 200 with 6-digit demo code', r.status === 200 && /^\d{6}$/.test(fpCode || ''))
+check('forgot-password unknown email → 200 (no leak)', call('POST', '/api/auth/forgot-password', { email: 'ghost@nowhere.io' }, null).status === 200)
+check('reset-password wrong code → 400', call('POST', '/api/auth/reset-password', { email: 'rohit@sunsetweddings.com', code: '000000', newPassword: 'newpass1' }, null).status === 400)
+check('reset-password short password → 400', call('POST', '/api/auth/reset-password', { email: 'rohit@sunsetweddings.com', code: fpCode, newPassword: '123' }, null).status === 400)
+r = call('POST', '/api/auth/reset-password', { email: 'rohit@sunsetweddings.com', code: fpCode, newPassword: 'newpass1' }, null)
+check('reset-password with correct code → 200', r.status === 200)
+check('login with new password → 200', call('POST', '/api/auth/login', { email: 'rohit@sunsetweddings.com', password: 'newpass1' }).status === 200)
+check('code is single-use → 400 on repeat', call('POST', '/api/auth/reset-password', { email: 'rohit@sunsetweddings.com', code: fpCode, newPassword: 'again12' }, null).status === 400)
+
+// ---------------- Booth-created ticket with session context (v2.1) ----------------
+r = call('POST', '/api/booth/tickets', {
+  organizationId: 'org-sunset', eventId: 'evt-sun-1', deviceId: dev.id,
+  subject: 'Print came out blank', category: 'payment', priority: 'high',
+  guestName: 'Test Guest', message: 'Paid but print is blank.',
+  session: {
+    id: 'SES-TEST', phone: '+91 90000 11111',
+    slot: { label: 'Slot T', start: '2026-09-24T10:00:00+05:30', end: '2026-09-24T10:30:00+05:30' },
+    package: { templateId: 'tpl-46-duo', frame: 'Classic White', prints: 2, digitalCopy: true },
+    cameraClicks: 5, filtersUsed: ['warm'],
+    payment: { utr: '417TEST999', amount: 100, status: 'paid', method: 'UPI', at: '2026-09-24T10:25:00+05:30' },
+    startedAt: '2026-09-24T10:00:00+05:30', endedAt: '2026-09-24T10:28:00+05:30',
+  },
+}, null)
+const btId = r.data?.ticket?.id
+check('POST booth ticket → 201 with resolved session refs', r.status === 201 && r.data?.ticket?.session?.package?.templateName === '4x6 Duo' && r.data?.ticket?.session?.phone === '+91 90000 11111')
+check('POST booth ticket without session → 400', call('POST', '/api/booth/tickets', { organizationId: 'org-sunset', subject: 'x' }, null).status === 400)
+r = call('GET', `/api/org/tickets/${btId}`, null, sana)
+check('org can read booth ticket with session', r.status === 200 && r.data?.ticket?.session?.payment?.utr === '417TEST999')
+
 console.log('\n' + results.join('\n'))
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

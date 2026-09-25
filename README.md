@@ -11,7 +11,7 @@ charts and layout are hand-rolled SVG/CSS so the app works in fully offline prev
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # production bundle in dist/
-node scripts/api-smoke.mjs    # API contract test (62 assertions)
+node scripts/api-smoke.mjs    # API contract test (80 assertions)
 node scripts/render-test.mjs  # role × screen render test (30 cases)
 ```
 

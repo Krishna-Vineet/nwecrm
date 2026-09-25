@@ -387,3 +387,72 @@ Auth — profile
 6. **Coupon redemption** is a single atomic transaction (validate + `$inc`) — P0 SEC-07.
    The print cost the booth shows is always `OrganizationDefaults.frames[].price` for the
    chosen frame (minus coupon) — events carry no price of their own.
+
+---
+
+## 4. v2.1 additions (this CRM release — mock implements all of these)
+
+### 4.1 Forgot password (OTP-style) — public auth routes
+```
+POST /api/auth/forgot-password   { email }
+  → 200 { ok: true, delivery: "email" }
+```
+- **Always 200** for any address — never reveal whether an account exists.
+- Issues a 6-digit code, valid **10 minutes, single-use**.
+- The real backend sends the code by **email AND SMS** (the CRM shows it on screen
+  only when `delivery` is `"demo"` — a mode flag for sandbox previews).
+```
+POST /api/auth/reset-password    { email, code, newPassword }
+  → 200 { ok: true } | 400 invalid/expired code | 400 password < 6 chars
+```
+- Store a hash of the code + expiry on the user; clear both on success.
+- Audit: `platform.auth.forgot_password` (warn) and `platform.auth.password_reset` (warn).
+
+### 4.2 Device rename + booth operator — org routes
+```
+PUT /api/org/devices/:id   { deviceName?, operatorName?, operatorPhone? }
+```
+- Perm: `organisation.events.devices.manage` → **both ORG_ADMIN and ORG_MANAGER**.
+- `deviceName` required non-empty; `operatorName`/`operatorPhone` nullable strings
+  (phone ≤ 20 chars). The operator is the **on-ground booth worker, not a CRM user** —
+  whoever assigns them records name + number so the whole team can reach them.
+- Returns `{ device }` with the same shape as `GET /api/org/devices` rows.
+- Audit: `device.updated` — "renamed X → Y", "operator A assigned/changed/removed".
+
+### 4.3 Hardware telemetry — booth push route (public, device-scoped)
+```
+POST /api/booth/devices/:deviceUuid/telemetry   { printsTotal, shutterCount, batteryPct }
+  → 200 { ok, telemetry }
+```
+- Authenticated by the **device UUID** (booth apps are not CRM users).
+- The booth pushes periodically (heartbeat cadence); the server clamps values
+  (counts ≥ 0, battery 0–100) and stamps `updatedAt`, refreshing `lastSeenAt`.
+- The CRM **reads** the stored `telemetry { prints, shutters, batteryPct, updatedAt }`
+  through `GET /api/org/devices` — it never computes it. Suggested Mongo shape: a
+  `deviceTelemetry` sub-document on `Device` plus an append-only `telemetryHistory`
+  collection if per-day rollups are wanted later.
+
+### 4.4 Support tickets created by the booth app — session context
+```
+POST /api/booth/tickets
+{ organizationId, eventId?, deviceId?, subject, category?, priority?,
+  guestName?, message?, session }
+```
+- `session` **must** include `phone` (validated) and ideally:
+```
+session: {
+  id: "SES-…",
+  phone: "+91 …",                       // collected from the guest at ticket time
+  slot: { label, start, end },          // slot the guest picked (label + times)
+  package: { templateId, templateName, frame, prints, digitalCopy },
+  cameraClicks: 12,                     // shutter activations this session
+  filtersUsed: ["warm", "bw"],          // what the guest customised
+  payment: { utr, amount, status, method, at },   // txn ref when paid
+  startedAt, endedAt
+}
+```
+- The server resolves `templateId`/`eventId`/`deviceId` into display names
+  (`session.package.templateName`, `session.event.name`, `session.device.name`)
+  and stores the snapshot immutably on the ticket.
+- The org reads it back on `GET /api/org/tickets/:id` as `ticket.session` — the
+  CRM renders it as the read-only "Booth session" card in the ticket drawer.

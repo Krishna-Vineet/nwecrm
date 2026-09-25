@@ -8,6 +8,10 @@ export const api = {
     me: () => request('GET', 'auth/me'),
     updateProfile: (body) => request('PUT', 'auth/profile', body),
     changePassword: (body) => request('POST', 'auth/password', body),
+    // Forgot-password (OTP-style): issue a 6-digit code, then reset with it.
+    // In demo the code is returned for display; the real backend emails/SMSes it.
+    forgotPassword: (email) => request('POST', 'auth/forgot-password', { email }),
+    resetPassword: (email, code, newPassword) => request('POST', 'auth/reset-password', { email, code, newPassword }),
   },
   platform: {
     dashboard: () => request('GET', 'platform/dashboard'),
@@ -41,6 +45,7 @@ export const api = {
     resumeEvent: (id) => request('POST', `org/events/${id}/resume`, {}),
     deleteEvent: (id) => request('DELETE', `org/events/${id}`),
     devices: () => request('GET', 'org/devices'),
+    updateDevice: (id, body) => request('PUT', `org/devices/${id}`, body),
     assignDevice: (id, eventId) => request('POST', `org/devices/${id}/assign`, { eventId }),
     unassignDevice: (id) => request('POST', `org/devices/${id}/unassign`, {}),
     removeDevice: (id) => request('DELETE', `org/devices/${id}`),

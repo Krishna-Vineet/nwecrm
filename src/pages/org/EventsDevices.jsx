@@ -42,6 +42,7 @@ export default function EventsDevices() {
   const [editor, setEditor] = useState(null) // 'new' | event
   const [deleting, setDeleting] = useState(null)
   const [removingDevice, setRemovingDevice] = useState(null)
+  const [editingDevice, setEditingDevice] = useState(null)
   const [busy, setBusy] = useState(false)
 
   const load = useCallback(() => {
@@ -279,9 +280,9 @@ export default function EventsDevices() {
                       <th>UUID</th>
                       <th>Hardware</th>
                       <th>Status</th>
+                      <th>Booth operator</th>
                       <th>Last seen</th>
                       <th>Assigned event</th>
-                      <th>Registered</th>
                       <th className="t-right">Actions</th>
                     </tr>
                   </thead>
@@ -290,17 +291,12 @@ export default function EventsDevices() {
                       <tr key={d.id}>
                         <td>
                           <div className="cell-main">{d.deviceName}</div>
-                          <div className="cell-sub">{d.location || '—'}</div>
+                          <div className="cell-sub">{d.location || '—'} · reg. {dateShort(d.registeredAt)}</div>
                         </td>
                         <td><code className="t11" style={{ background: 'var(--surface-2)', padding: '3px 7px', borderRadius: 5 }}>{uuidShort(d.deviceUuid)}</code></td>
-                        <td>
-                          <div className="row gap-8">
-                            {d.hardware?.includes('camera') ? <Icon name="camera" size={14} style={{ color: 'var(--muted)' }} /> : null}
-                            {d.hardware?.includes('printer') ? <Icon name="printer" size={14} style={{ color: 'var(--muted)' }} /> : null}
-                            {d.hardware?.includes('wifi') ? <Icon name="wifi" size={14} style={{ color: 'var(--muted)' }} /> : null}
-                          </div>
-                        </td>
+                        <td><TelemetryCell device={d} /></td>
                         <td><Chip tone={d.online ? 'active' : 'neutral'} dot>{d.online ? 'Online' : 'Offline'}</Chip></td>
+                        <td><OperatorCell device={d} /></td>
                         <td className="t13 muted">{d.lastSeenAt ? relativeTime(d.lastSeenAt) : 'never'}</td>
                         <td>
                           {d.assignedEvent ? (
@@ -312,9 +308,11 @@ export default function EventsDevices() {
                             <span className="t12 faint">No event</span>
                           )}
                         </td>
-                        <td className="t13 muted">{dateShort(d.registeredAt)}</td>
                         <td className="t-right">
-                          <Button size="sm" variant="ghost" icon="trash" style={{ color: 'var(--danger)' }} title="Remove device" onClick={() => setRemovingDevice(d)} />
+                          <div className="row gap-8" style={{ justifyContent: 'flex-end' }}>
+                            <Button size="sm" variant="ghost" icon="edit" title="Rename device / set booth operator" onClick={() => setEditingDevice(d)} />
+                            <Button size="sm" variant="ghost" icon="trash" style={{ color: 'var(--danger)' }} title="Remove device" onClick={() => setRemovingDevice(d)} />
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -356,6 +354,12 @@ export default function EventsDevices() {
                       <div style={{ minWidth: 0 }}>
                         <div className="t13 fw6 ellipsis">{device.deviceName}</div>
                         <div className="t11 muted">{device.location || '—'} · {device.online ? 'online' : 'offline'}</div>
+                        {device.operatorName ? (
+                          <div className="t11 row gap-6" style={{ color: 'var(--hp-green-ink)', marginTop: 2 }} title="Booth operator on ground">
+                            <Icon name="user-check" size={11} />
+                            <span className="ellipsis">{device.operatorName}{device.operatorPhone ? ` · ${device.operatorPhone}` : ''}</span>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                     <Icon name="chevron-right" size={15} style={{ color: 'var(--faint)', flex: 'none' }} />
@@ -415,7 +419,163 @@ export default function EventsDevices() {
         message="The booth will be blocked from connecting. Its registration record is deleted; re-pairing creates a new UUID."
         confirmLabel="Remove device"
       />
+
+      {editingDevice ? (
+        <DeviceEditModal
+          device={editingDevice}
+          onClose={() => setEditingDevice(null)}
+          onSaved={() => { setEditingDevice(null); load() }}
+        />
+      ) : null}
     </div>
+  )
+}
+
+// ---------------- Device telemetry (Hardware column) ----------------
+// Numbers the booth app pushes to the backend: prints made by the printer,
+// shutter count of the camera, camera battery %. The CRM only reads this.
+
+function TelemetryCell({ device }) {
+  const t = device.telemetry
+  if (!t) return <span className="t12 faint">No telemetry yet</span>
+  const num = (n) => Number(n || 0).toLocaleString('en-IN')
+  return (
+    <div className="tel">
+      {device.hardware?.includes('printer') ? (
+        <span className="tel-row" title="Prints this printer has made (pushed by the booth app)">
+          <Icon name="printer" size={13} />
+          <b>{num(t.prints)}</b>&nbsp;prints
+        </span>
+      ) : null}
+      {device.hardware?.includes('camera') ? (
+        <span className="tel-row" title="Camera shutter count (pushed by the booth app)">
+          <Icon name="aperture" size={13} />
+          <b>{num(t.shutters)}</b>&nbsp;clicks
+        </span>
+      ) : null}
+      {t.batteryPct != null ? <BatteryPill pct={t.batteryPct} /> : null}
+      <span className="tel-stale" title={`Last pushed ${new Date(t.updatedAt).toLocaleString()}`}>
+        via booth · {relativeTime(t.updatedAt)}
+      </span>
+    </div>
+  )
+}
+
+function BatteryPill({ pct }) {
+  const color = pct >= 50 ? 'var(--hp-green-ink)' : pct >= 25 ? 'var(--warn)' : 'var(--danger)'
+  const fill = Math.max(0, Math.min(12.4, (pct / 100) * 12.4))
+  return (
+    <span className="tel-row" title={`Camera battery ${pct}%`}>
+      <span className="batt">
+        <svg width="23" height="13" viewBox="0 0 23 13" fill="none" aria-hidden="true">
+          <rect x="0.6" y="0.6" width="18.2" height="11.8" rx="2.6" stroke={color} strokeWidth="1.2" />
+          <path d="M21.2 4.4v4.2" stroke={color} strokeWidth="1.7" strokeLinecap="round" />
+          {fill > 0.5 ? <rect x="2.4" y="2.4" width={fill} height="8.2" rx="1.4" fill={color} /> : null}
+        </svg>
+        <b style={{ marginLeft: 5, color, minWidth: 34 }}>{pct}%</b>
+      </span>
+    </span>
+  )
+}
+
+function OperatorCell({ device }) {
+  if (!device.operatorName) return <span className="t12 faint">Not assigned</span>
+  return (
+    <div>
+      <div className="row gap-6 t13 fw6">
+        <Icon name="user-check" size={13} style={{ color: 'var(--hp-green-ink)', flex: 'none' }} />
+        <span className="ellipsis">{device.operatorName}</span>
+      </div>
+      {device.operatorPhone ? (
+        <a
+          href={`tel:${device.operatorPhone.replace(/[^+\d]/g, '')}`}
+          className="row gap-6 t11 muted"
+          style={{ marginTop: 2 }}
+          title="Call the booth operator"
+        >
+          <Icon name="phone" size={11} style={{ flex: 'none' }} />
+          {device.operatorPhone}
+        </a>
+      ) : (
+        <div className="t11 faint" style={{ marginTop: 2 }}>No phone saved</div>
+      )}
+    </div>
+  )
+}
+
+// ---------------- Device edit: rename + booth operator ----------------
+
+function DeviceEditModal({ device, onClose, onSaved }) {
+  const { toast } = useApp()
+  const [name, setName] = useState(device.deviceName || '')
+  const [opName, setOpName] = useState(device.operatorName || '')
+  const [opPhone, setOpPhone] = useState(device.operatorPhone || '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const save = async () => {
+    if (!name.trim()) return setError('Device name cannot be empty.')
+    if (opPhone.trim() && !/^[+\d][\d\s\-()]{5,19}$/.test(opPhone.trim())) {
+      return setError('Phone number looks invalid — use digits, spaces or dashes.')
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await api.org.updateDevice(device.id, {
+        deviceName: name.trim(),
+        operatorName: opName.trim(),
+        operatorPhone: opPhone.trim(),
+      })
+      toast('Device updated')
+      onSaved()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Edit device"
+      sub={`${device.deviceName} · UUID ${uuidShort(device.deviceUuid)}`}
+      footer={
+        <>
+          {error ? <span className="input-error" style={{ marginRight: 'auto' }}>{error}</span> : null}
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" icon="check" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save changes'}</Button>
+        </>
+      }
+    >
+      <Field label="Device name" required hint="Shown across the CRM — events, assignments, revenue and support tickets.">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Booth 02 — Lawn" autoFocus />
+      </Field>
+
+      <div className="divider" />
+
+      <div className="sess-block-title" style={{ color: 'var(--hp-green-ink)' }}>
+        <Icon name="user-check" size={13} /> Booth operator — on-ground contact
+      </div>
+      <p className="t12 muted" style={{ marginBottom: 12, lineHeight: 1.55 }}>
+        The person physically stationed at this booth (not a CRM user). They watch for hardware
+        issues and guide guests. Whoever assigns the operator records them here — every org admin
+        and manager can then see the name and number to reach them.
+      </p>
+      <div className="row gap-12">
+        <div style={{ flex: 1 }}>
+          <Field label="Operator name">
+            <TextInput value={opName} onChange={(e) => setOpName(e.target.value)} placeholder="e.g. Sunil Yadav" />
+          </Field>
+        </div>
+        <div style={{ flex: 1 }}>
+          <Field label="Operator phone" hint="Visible to the whole organisation team.">
+            <TextInput type="tel" value={opPhone} onChange={(e) => setOpPhone(e.target.value)} placeholder="+91 98110 55220" />
+          </Field>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
@@ -552,7 +712,7 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
                     style={{
                       padding: '8px 12px', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontWeight: 600,
                       border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
-                      background: sel ? 'rgba(234,9,127,0.06)' : 'var(--surface)',
+                      background: sel ? 'var(--hp-pink-soft)' : 'var(--surface)',
                       color: sel ? 'var(--hp-pink-deep)' : 'var(--ink-2)',
                     }}
                   >
@@ -575,7 +735,7 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
                     style={{
                       position: 'relative', padding: 6, borderRadius: 8, cursor: 'pointer', textAlign: 'center',
                       border: `1.5px solid ${sel ? 'var(--hp-pink)' : 'var(--line)'}`,
-                      background: sel ? 'rgba(234,9,127,0.06)' : 'var(--surface)',
+                      background: sel ? 'var(--hp-pink-soft)' : 'var(--surface)',
                     }}
                   >
                     <FramePreview
@@ -606,7 +766,7 @@ function EventEditor({ open, initial, templates, defaults, onClose, onSaved }) {
           <Field label="Client logo" hint="Default: none. If added, it appears in the 15% footer of every print.">
             {form.logoUrl ? (
               <div className="row gap-12" style={{ alignItems: 'center' }}>
-                <img src={form.logoUrl} alt="Logo" style={{ height: 52, borderRadius: 8, border: '1px solid var(--line)', objectFit: 'contain', background: '#fff' }} />
+                <img src={form.logoUrl} alt="Logo" style={{ height: 52, borderRadius: 8, border: '1px solid var(--line)', objectFit: 'contain', background: 'var(--surface)' }} />
                 <Button size="sm" variant="ghost" icon="trash" onClick={() => set('logoUrl', null)} style={{ color: 'var(--danger)' }}>Remove</Button>
               </div>
             ) : (
