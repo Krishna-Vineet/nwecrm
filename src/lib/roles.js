@@ -112,7 +112,7 @@ export const SCREENS = [
       { id: 'platform-dashboard', label: 'Dashboard', perm: PERMS.PLATFORM_DASHBOARD_VIEW, path: '/platform/dashboard', icon: 'dashboard' },
       { id: 'platform-revenue', label: 'Revenue', perm: PERMS.PLATFORM_REVENUE_VIEW, path: '/platform/revenue', icon: 'revenue' },
       { id: 'platform-orgs', label: 'Organisations', perm: PERMS.PLATFORM_ORGS_VIEW, path: '/platform/organisations', icon: 'building' },
-      { id: 'platform-templates', label: 'Templates & Frames', perm: PERMS.GLOBAL_TEMPLATES_MANAGE, path: '/platform/templates', icon: 'template' },
+      { id: 'platform-templates', label: 'Template Library', perm: PERMS.GLOBAL_TEMPLATES_MANAGE, path: '/platform/templates', icon: 'template' },
       { id: 'platform-team', label: 'Team & Roles', perm: PERMS.PLATFORM_USERS_MANAGE, path: '/platform/team', icon: 'users', viewOnlyFor: [ROLES.PLATFORM_ADMIN] },
       { id: 'platform-audit', label: 'Audit & Logs', perm: PERMS.PLATFORM_AUDIT_VIEW, path: '/platform/audit', icon: 'log' },
     ],

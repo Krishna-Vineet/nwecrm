@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/index.js'
 import { useApp } from '../context/AppContext.jsx'
-import { Card, CardHead, Field, TextInput, Button, Avatar, Chip, KV, WarnBanner } from '../components/ui.jsx'
+import { Card, CardHead, Field, TextInput, PasswordInput, Button, Avatar, Chip, KV, ThemeSegmented } from '../components/ui.jsx'
 import { Icon } from '../lib/icons.jsx'
 import { ROLE_LABELS, ROLE_DESCRIPTIONS } from '../lib/roles.js'
 import { PLANS } from '../lib/plans.js'
 import { dateShort, inr } from '../lib/format.js'
 
 export default function Profile() {
-  const { user, updateUser, toast } = useApp()
+  const { user, updateUser, toast, theme, toggleTheme } = useApp()
   const [name, setName] = useState(user?.name || '')
   const [photo, setPhoto] = useState(user?.photoUrl || null)
   const [cur, setCur] = useState('')
@@ -108,20 +108,39 @@ export default function Profile() {
 
         <div style={{ display: 'grid', gap: 14, alignContent: 'start' }}>
           <Card>
+            <CardHead title="Appearance" sub="Choose how the CRM looks on this device." />
+            <div style={{ padding: '18px 20px' }}>
+              <div className="row between gap-16" style={{ flexWrap: 'wrap' }}>
+                <div style={{ minWidth: 180 }}>
+                  <div className="t13 fw6">Colour theme</div>
+                  <div className="t11 muted" style={{ marginTop: 2, lineHeight: 1.5 }}>
+                    {theme === 'dark' ? 'Dark — easy on the eyes in low light.' : 'Light — the classic bright workspace.'}
+                  </div>
+                </div>
+                <ThemeSegmented theme={theme} onChange={(t) => { if (t !== theme) toggleTheme() }} />
+              </div>
+              <p className="t11 faint mt-12" style={{ lineHeight: 1.5 }}>
+                <Icon name="info" size={12} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+                Your choice is saved on this device and applied everywhere, including the login screen.
+              </p>
+            </div>
+          </Card>
+
+          <Card>
             <CardHead title="Change password" sub="Your session stays active after changing it." />
             <div style={{ padding: '18px 20px' }}>
               <Field label="Current password">
-                <TextInput type="password" value={cur} onChange={(e) => setCur(e.target.value)} />
+                <PasswordInput value={cur} onChange={(e) => setCur(e.target.value)} autoComplete="current-password" />
               </Field>
               <div className="row gap-12">
                 <div style={{ flex: 1 }}>
                   <Field label="New password">
-                    <TextInput type="password" value={nw} onChange={(e) => setNw(e.target.value)} />
+                    <PasswordInput value={nw} onChange={(e) => setNw(e.target.value)} autoComplete="new-password" />
                   </Field>
                 </div>
                 <div style={{ flex: 1 }}>
                   <Field label="Confirm new password">
-                    <TextInput type="password" value={cf} onChange={(e) => setCf(e.target.value)} />
+                    <PasswordInput value={cf} onChange={(e) => setCf(e.target.value)} autoComplete="new-password" />
                   </Field>
                 </div>
               </div>

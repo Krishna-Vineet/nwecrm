@@ -13,8 +13,7 @@ import {
   ROLES, PERMS, roleHasPermission, isOrgRole, isPlatformRole,
 } from '../../lib/roles.js'
 import { PLANS, DEVICE_ONLINE_WINDOW_MS, FILTERS } from '../../lib/plans.js'
-import { slotsFor, ORIENTATIONS, SLOT_COUNTS } from '../../lib/templates.js'
-import { frameUsage } from '../../lib/frames.js'
+import { LAYOUT_FAMILIES, LAYOUT_BY_ID, layoutById, layoutLabel, suggestedPriceMap } from '../../lib/layouts.js'
 import { monthKey, fyStart } from '../../lib/format.js'
 
 const NOW = () => new Date('2026-09-24T11:30:00+05:30') // demo clock = "today"
@@ -130,6 +129,45 @@ function logAudit(db, { at, actorId, action, entity, summary, ip, organizationId
   })
 }
 
+function layoutMeta(id) {
+  const l = layoutById(id)
+  if (!l) return null
+  return { id: l.id, familyId: l.familyId, name: l.name, code: l.code, orientation: l.orientation, slots: l.slots, cutout: l.cutout, sheets: l.sheets, canvas: l.canvas, label: layoutLabel(l) }
+}
+
+function withTemplateLayout(t) {
+  return { ...t, layout: layoutMeta(t.layoutId) }
+}
+
+function aiDesignFor(hash, layout) {
+  const palettes = [
+    { accent: '#D9B44A', textColor: '#FFFFFF' },
+    { accent: '#F42E93', textColor: '#FFFFFF' },
+    { accent: '#74A3E9', textColor: '#FFFFFF' },
+    { accent: '#A6D76C', textColor: '#16121F' },
+    { accent: '#F3D9A4', textColor: '#FFFFFF' },
+  ]
+  const ornaments = ['none', 'dots', 'flourish', 'stripes']
+  const fonts = ['sans', 'serif', 'script']
+  const shapes = ['rect', 'arch', 'round']
+  const pal = palettes[hash % palettes.length]
+  return {
+    bg: { type: 'image', url: aiBackgroundSvg(layout.canvas.w, layout.canvas.h, pal.accent, hash) },
+    accent: pal.accent,
+    textColor: pal.textColor,
+    ornament: ornaments[hash % ornaments.length],
+    font: fonts[(hash >> 2) % fonts.length],
+    slotShape: shapes[(hash >> 3) % shapes.length],
+    titleBand: false,
+  }
+}
+
+function aiBackgroundSvg(w, h, accent, hash) {
+  const c2 = hash % 2 === 0 ? '#221741' : '#3A1C33'
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><defs><linearGradient id="g" x1="0" y1="0" x2="0.9" y2="1"><stop offset="0" stop-color="${c2}"/><stop offset="1" stop-color="#120D1F"/></linearGradient><radialGradient id="r" cx="0.5" cy="0.2" r="0.9"><stop offset="0" stop-color="${accent}66"/><stop offset="1" stop-color="${accent}00"/></radialGradient></defs><rect width="${w}" height="${h}" fill="url(#g)"/><rect width="${w}" height="${h}" fill="url(#r)"/><circle cx="${w * 0.78}" cy="${h * 0.16}" r="${w * 0.22}" fill="none" stroke="${accent}" stroke-opacity="0.5" stroke-width="3"/><circle cx="${w * 0.16}" cy="${h * 0.72}" r="${w * 0.16}" fill="${accent}" fill-opacity="0.08"/><circle cx="${w * 0.85}" cy="${h * 0.85}" r="${w * 0.1}" fill="#FFFFFF" fill-opacity="0.05"/></svg>`
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
+}
+
 function userPublic(u) {
   return {
     id: u.id, name: u.name, email: u.email, role: u.role,
@@ -232,6 +270,39 @@ export function handle(method, path, body, token) {
       authed()
       return { status: 200, data: { user: userPublic(user) } }
     }
+    if (p2 === 'forgot-password' && method === 'POST') {
+      // Public. Always 200 — never reveal whether the account exists.
+      // Demo mode: the 6-digit code is returned as `code` because there is
+      // no email/SMS server in the sandbox; the real backend sends it via
+      // email/SMS instead (see BACKEND-CHANGES.md).
+      const email = String((body && body.email) || '').trim().toLowerCase()
+      const u = db.users.find((x) => x.email.toLowerCase() === email)
+      if (u && u.status === 'active') {
+        const code = String(Math.floor(100000 + Math.random() * 900000))
+        u.resetCode = code
+        u.resetCodeExpiry = new Date(NOW().getTime() + 10 * 60 * 1000).toISOString()
+        logAudit(db, { actorId: u.id, action: 'platform.auth.forgot_password', entity: 'user', summary: `Password reset code issued for ${u.name}`, severity: 'warn', organizationId: u.organizationId })
+        persist()
+        return { status: 200, data: { ok: true, delivery: 'demo', code } }
+      }
+      return { status: 200, data: { ok: true, delivery: 'email' } }
+    }
+    if (p2 === 'reset-password' && method === 'POST') {
+      // Public. Email + 6-digit code + new password.
+      const email = String((body && body.email) || '').trim().toLowerCase()
+      const code = String((body && body.code) || '').trim()
+      const newPassword = String((body && body.newPassword) || '')
+      const u = db.users.find((x) => x.email.toLowerCase() === email)
+      if (!u || !u.resetCode || u.resetCode !== code) throw new ApiError(400, 'Invalid or expired reset code.')
+      if (!u.resetCodeExpiry || new Date(u.resetCodeExpiry) < NOW()) throw new ApiError(400, 'This reset code has expired. Request a new one.')
+      if (newPassword.length < 6) throw new ApiError(400, 'New password must be at least 6 characters.')
+      u.password = newPassword
+      u.resetCode = null
+      u.resetCodeExpiry = null
+      logAudit(db, { actorId: u.id, action: 'platform.auth.password_reset', entity: 'user', summary: `${u.name} reset their password via forgot-password`, severity: 'warn', organizationId: u.organizationId })
+      persist()
+      return { status: 200, data: { ok: true } }
+    }
     if (p2 === 'profile' && method === 'PUT') {
       authed(PERMS.PROFILE_EDIT)
       if (body.name) user.name = String(body.name).trim()
@@ -247,6 +318,70 @@ export function handle(method, path, body, token) {
       logAudit(db, { actorId: user.id, action: 'platform.auth.password_change', entity: 'user', summary: `${user.name} changed their password`, organizationId: user.organizationId })
       persist()
       return { status: 200, data: { ok: true } }
+    }
+  }
+
+  // ================= BOOTH (device-facing; the booth app pushes here) =================
+  // The booth authenticates with its generated device UUID (it is not a
+  // CRM user). The real backend implements the same contract.
+  if (p === 'booth') {
+    if (p2 === 'devices' && p3 && parts[3] === 'telemetry' && method === 'POST') {
+      // Hardware heartbeat from the booth app:
+      //   { printsTotal, shutterCount, batteryPct }
+      // The CRM reads this back through GET /org/devices (Hardware column).
+      const d = db.devices.find((x) => x.deviceUuid === p3)
+      if (!d) throw new ApiError(404, 'Device not found.')
+      const clampInt = (v, min, max) => Math.max(min, Math.min(max, Math.round(Number(v) || 0)))
+      const prev = d.telemetry || {}
+      const tel = {
+        prints: body && body.printsTotal != null ? clampInt(body.printsTotal, 0, 10_000_000) : prev.prints || 0,
+        shutters: body && body.shutterCount != null ? clampInt(body.shutterCount, 0, 10_000_000) : prev.shutters || 0,
+        batteryPct: body && body.batteryPct != null ? clampInt(body.batteryPct, 0, 100) : prev.batteryPct ?? null,
+        updatedAt: NOW().toISOString(),
+      }
+      d.telemetry = tel
+      d.lastSeenAt = tel.updatedAt
+      persist()
+      return { status: 200, data: { ok: true, telemetry: tel } }
+    }
+    if (p2 === 'tickets' && !p3 && method === 'POST') {
+      // Guest support ticket raised by the booth app at session end / after
+      // payment. The booth collects the guest's phone number and attaches
+      // the whole session: slot, camera clicks, customisations, payment.
+      // Body: { organizationId, eventId, deviceId, subject, category,
+      //         priority, guestName, guestPhone, message, session }
+      const { organizationId, eventId, deviceId, subject, session } = body || {}
+      const org = db.organisations.find((o) => o.id === organizationId)
+      if (!org) throw new ApiError(400, 'organizationId is required.')
+      if (!subject || !String(subject).trim()) throw new ApiError(400, 'Subject is required.')
+      if (!session || !session.phone) throw new ApiError(400, 'Session context with the guest phone number is required.')
+      const t = {
+        id: uid('tix'),
+        organizationId,
+        eventId: eventId || null,
+        deviceId: deviceId || null,
+        subject: String(subject).trim(),
+        category: ['device', 'payment', 'photo', 'event', 'general'].includes(body.category) ? body.category : 'general',
+        priority: ['low', 'medium', 'high', 'urgent'].includes(body.priority) ? body.priority : 'medium',
+        status: 'open',
+        guest: { name: (body.guestName || 'Guest').trim(), contact: String(session.phone).trim() },
+        session: {
+          ...session,
+          // snapshot ids resolved for display by withTicketRefs
+          eventId: eventId || null,
+          deviceId: deviceId || null,
+        },
+        createdAt: NOW().toISOString(),
+        updatedAt: NOW().toISOString(),
+        messages: [
+          { id: uid('m'), author: 'Guest (booth)', at: NOW().toISOString(), text: String(body.message || subject).trim() },
+        ],
+        resolution: null,
+      }
+      db.tickets.unshift(t)
+      logAudit(db, { actorId: null, action: 'ticket.created_from_booth', entity: 'ticket', summary: `Ticket “${t.subject}” raised from booth (session ${session.id || 'n/a'})`, organizationId })
+      persist()
+      return { status: 201, data: { ticket: withTicketRefs(t) } }
     }
   }
 
@@ -452,85 +587,60 @@ export function handle(method, path, body, token) {
     if (p2 === 'templates') {
       if (!p3 && method === 'GET') {
         authed(roleHasPermission(user.role, PERMS.GLOBAL_TEMPLATES_MANAGE) ? null : PERMS.GLOBAL_TEMPLATES_USE)
-        return { status: 200, data: { templates: db.templates } }
+        return { status: 200, data: { templates: db.templates.map(withTemplateLayout) } }
       }
       if (!p3 && method === 'POST') {
+        // Template Library — create a template in the Playground.
+        // The owner shapes palette/ornament/typography (+ optional AI
+        // background) against one layout variant; hand-finished designer
+        // components live in src/templates and cannot be created here.
         authed(PERMS.GLOBAL_TEMPLATES_MANAGE)
-        // Template creation (v2, same flow as the original HappyPix CRM):
-        //   name + category + design scope (universal | specific)
-        //   specific → orientation + slot count → photoSlots computed
-        //   server-side from the Architecture V1 engine (clients never
-        //   send coordinates). Manual uploads carry a background image;
-        //   AI-generated templates are saved after preview approval.
-        const { name, description, category, imageScope, orientation, slotCount, backgroundUrl, status } = body || {}
+        const { name, description, category, layoutId, design, status, source } = body || {}
         if (!name || !String(name).trim()) throw new ApiError(400, 'Template name is required.')
-        const scope = imageScope === 'general' ? 'general' : 'specific'
-        let layout = null
-        if (scope === 'specific') {
-          if (!ORIENTATIONS.includes(orientation)) throw new ApiError(400, 'Orientation must be portrait, landscape, strip or square.')
-          if (!SLOT_COUNTS.includes(Number(slotCount))) throw new ApiError(400, 'Photo slots must be one of 1, 2, 3, 4, 6.')
-          layout = slotsFor(orientation, Number(slotCount))
-        }
+        const layout = layoutById(layoutId)
+        if (!layout) throw new ApiError(400, 'A valid layout variant is required (pick one of the 106).')
         const t = {
           id: uid('tpl'),
+          componentId: null,
+          design: design && typeof design === 'object' ? design : aiDesignFor(Date.now() % 97, layout),
           name: String(name).trim(),
           description: description || '',
           category: category || 'Custom',
-          imageScope: scope,
-          orientation: scope === 'specific' ? orientation : 'universal',
-          slotCount: scope === 'specific' ? Number(slotCount) : 0,
-          canvas: scope === 'specific' ? layout.canvas : { width: 1200, height: 1800 },
-          photoSlots: scope === 'specific' ? layout.photoSlots : [],
-          backgroundUrl: backgroundUrl || null,
-          source: body.source === 'ai_generated' ? 'ai_generated' : 'manual',
-          status: status || 'published',
+          layoutId: layout.id,
+          source: source === 'ai_generated' ? 'ai_generated' : 'playground',
+          status: status === 'draft' ? 'draft' : 'published',
           active: true,
           usage: 0,
           createdAt: NOW().toISOString(),
           updatedAt: NOW().toISOString(),
         }
         db.templates.unshift(t)
-        logAudit(db, { actorId: user.id, action: 'platform.template.created', entity: 'template', summary: `Global template “${t.name}” created (${t.category}, ${scope === 'specific' ? `${layout.photoSlots.length} slots · ${orientation}` : 'universal background'})` })
+        logAudit(db, { actorId: user.id, action: 'platform.template.created', entity: 'template', summary: `Template “${t.name}” created in the playground (${layoutLabel(layout)})` })
         persist()
-        return { status: 201, data: { template: t } }
+        return { status: 201, data: { template: withTemplateLayout(t) } }
       }
     }
     if (p2 === 'templates' && p3 === 'ai-generate' && method === 'POST') {
-      // Mock AI generation — deterministic, returns a DRAFT for preview.
-      // The real backend hits the generation service; the client only
-      // persists it after the user approves the preview.
+      // Playground AI assist: generates a design draft (palette + ornaments +
+      // AI background art at the layout's exact aspect) for the owner to tweak
+      // before saving. Nothing is persisted until "Create template".
       authed(PERMS.GLOBAL_TEMPLATES_MANAGE)
-      const { prompt, imageScope, orientation, slotCount } = body || {}
+      const { prompt, layoutId } = body || {}
       if (!prompt || !String(prompt).trim()) throw new ApiError(400, 'A prompt is required.')
-      const scope = imageScope === 'general' ? 'general' : 'specific'
-      let layout = null
-      if (scope === 'specific') {
-        if (!ORIENTATIONS.includes(orientation)) throw new ApiError(400, 'Orientation must be portrait, landscape, strip or square.')
-        if (!SLOT_COUNTS.includes(Number(slotCount))) throw new ApiError(400, 'Photo slots must be one of 1, 2, 3, 4, 6.')
-        layout = slotsFor(orientation, Number(slotCount))
-      }
-      const p = String(prompt).trim().toLowerCase()
-      const palettes = [
-        ['#5F4CAA', '#3A3170'], ['#EA097F', '#5F4CAA'], ['#3871C1', '#1E3E70'],
-        ['#6E1F2A', '#3A3170'], ['#D9B44A', '#8C6D1F'], ['#14532D', '#0B2E1B'],
-      ]
-      let h = 0
-      for (let i = 0; i < p.length; i++) h = (h * 31 + p.charCodeAt(i)) >>> 0
-      const [c1, c2] = palettes[h % palettes.length]
+      const layout = layoutById(layoutId)
+      if (!layout) throw new ApiError(400, 'A valid layout variant is required.')
+      let hash = 0
+      const pt = String(prompt).trim().toLowerCase()
+      for (let i = 0; i < pt.length; i++) hash = (hash * 31 + pt.charCodeAt(i)) >>> 0
       const words = String(prompt).trim().split(/\s+/).slice(0, 4).map((w) => w[0].toUpperCase() + w.slice(1))
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs><rect width="400" height="600" fill="url(#g)"/><circle cx="200" cy="240" r="90" fill="rgba(255,255,255,0.14)"/><circle cx="120" cy="440" r="50" fill="rgba(255,255,255,0.1)"/><circle cx="300" cy="480" r="70" fill="rgba(255,255,255,0.08)"/></svg>`
       const draft = {
         name: words.join(' ') || 'AI Design',
         description: `Generated: ${String(prompt).trim()}`,
         category: 'Custom',
-        imageScope: scope,
-        orientation: scope === 'specific' ? orientation : 'universal',
-        slotCount: scope === 'specific' ? Number(slotCount) : 0,
-        canvas: scope === 'specific' ? layout.canvas : { width: 1200, height: 1800 },
-        photoSlots: scope === 'specific' ? layout.photoSlots : [],
-        backgroundUrl: 'data:image/svg+xml;utf8,' + encodeURIComponent(svg),
+        layoutId: layout.id,
         source: 'ai_generated',
         status: 'draft',
+        design: aiDesignFor(hash, layout),
       }
       return { status: 200, data: { draft } }
     }
@@ -538,62 +648,35 @@ export function handle(method, path, body, token) {
       authed(PERMS.GLOBAL_TEMPLATES_MANAGE)
       const t = db.templates.find((x) => x.id === p3)
       if (!t) throw new ApiError(404, 'Template not found.')
-      Object.assign(t, pickDefined(body, ['name', 'category', 'description', 'active', 'status']))
+      if (body.layoutId != null) {
+        const l = layoutById(body.layoutId)
+        if (!l) throw new ApiError(400, 'Unknown layout variant.')
+        if (db.events.some((e) => (e.templateIds || []).includes(t.id)) && l.id !== t.layoutId) {
+          throw new ApiError(409, 'This template is used by events — its layout cannot change.')
+        }
+        t.layoutId = l.id
+      }
+      Object.assign(t, pickDefined(body, ['name', 'category', 'description', 'active', 'status', 'design']))
       t.updatedAt = NOW().toISOString()
-      logAudit(db, { actorId: user.id, action: body.active === false ? 'platform.template.disabled' : 'platform.template.updated', entity: 'template', summary: `Global template “${t.name}” ${body.status === 'published' && t.status === 'draft' ? 'saved from AI preview' : 'updated'}` })
+      const publishing = body.active === true && t.active !== false
+      logAudit(db, {
+        actorId: user.id,
+        action: body.active === false ? 'platform.template.unpublished' : publishing ? 'platform.template.published' : 'platform.template.updated',
+        entity: 'template',
+        summary: `Global template “${t.name}” ${body.active === false ? 'unpublished — hidden from organisations' : publishing ? 'published — available to all organisations' : 'updated'}`,
+      })
       persist()
-      return { status: 200, data: { template: t } }
+      return { status: 200, data: { template: withTemplateLayout(t) } }
     }
     if (p2 === 'templates' && p3 && p3 !== 'ai-generate' && method === 'DELETE') {
       authed(PERMS.GLOBAL_TEMPLATES_MANAGE)
       const t = db.templates.find((x) => x.id === p3)
       if (!t) throw new ApiError(404, 'Template not found.')
+      if (t.source === 'designer') throw new ApiError(409, 'Designer templates are hand-crafted code — unpublish instead of deleting.')
       const used = db.events.some((e) => (e.templateIds || []).includes(t.id))
-      if (used) throw new ApiError(409, 'This template is used by events. Disable it instead of deleting.')
+      if (used) throw new ApiError(409, 'This template is used by events. Unpublish it instead of deleting.')
       db.templates = db.templates.filter((x) => x.id !== p3)
-      logAudit(db, { actorId: user.id, action: 'platform.template.deleted', entity: 'template', summary: `Global template “${t.name}” deleted`, severity: 'warn' })
-      persist()
-      return { status: 200, data: { ok: true } }
-    }
-
-    // ---------------- Frames (platform catalogue; Owner adds/removes) ----------------
-    if (p2 === 'frames' && !p3) {
-      if (method === 'GET') {
-        authed()
-        return { status: 200, data: { frames: db.frames.map((f) => ({ ...f, enabledOrgs: frameUsage(db, f.id) })) } }
-      }
-      if (method === 'POST') {
-        if (user.role !== ROLES.OWNER) throw new ApiError(403, 'Only the Owner can modify the frame catalogue.')
-        const { name, background, defaultPrice } = body || {}
-        if (!name || !String(name).trim()) throw new ApiError(400, 'Frame name is required.')
-        if (!background || !background.type || !(background.colors || []).length) throw new ApiError(400, 'Background type and colours are required.')
-        if (db.frames.some((f) => f.name.toLowerCase() === String(name).trim().toLowerCase())) throw new ApiError(409, 'A frame with this name already exists.')
-        const f = {
-          id: uid('frame'),
-          name: String(name).trim(),
-          description: body.description || 'Custom frame added by the platform.',
-          background: {
-            type: background.type === 'gradient' ? 'gradient' : 'solid',
-            colors: background.colors.slice(0, background.type === 'gradient' ? 2 : 1),
-            pattern: ['none', 'dots', 'stripes'].includes(background.pattern) ? background.pattern : 'none',
-          },
-          text: body.text || (background.colors[0] && /^#([0-2]|3[0-9])/i.test(background.colors[0]) ? '#FFFFFF' : '#3A3344'),
-          defaultPrice: Math.max(0, Number(defaultPrice) || 0),
-        }
-        db.frames.push(f)
-        logAudit(db, { actorId: user.id, action: 'platform.frame.created', entity: 'frame', summary: `Frame “${f.name}” added to the catalogue` })
-        persist()
-        return { status: 201, data: { frame: f } }
-      }
-    }
-    if (p2 === 'frames' && p3 && method === 'DELETE') {
-      if (user.role !== ROLES.OWNER) throw new ApiError(403, 'Only the Owner can modify the frame catalogue.')
-      const f = db.frames.find((x) => x.id === p3)
-      if (!f) throw new ApiError(404, 'Frame not found.')
-      const enabled = frameUsage(db, f.id)
-      if (enabled > 0) throw new ApiError(409, `Frame is enabled at ${enabled} organisation(s). Disable it in their Organisation Defaults first.`)
-      db.frames = db.frames.filter((x) => x.id !== p3)
-      logAudit(db, { actorId: user.id, action: 'platform.frame.deleted', entity: 'frame', summary: `Frame “${f.name}” removed from the catalogue`, severity: 'warn' })
+      logAudit(db, { actorId: user.id, action: 'platform.template.deleted', entity: 'template', summary: `Template “${t.name}” deleted`, severity: 'warn' })
       persist()
       return { status: 200, data: { ok: true } }
     }
@@ -730,6 +813,12 @@ export function handle(method, path, body, token) {
         for (const fid of fids) {
           if (!FILTERS.some((f) => f.id === fid)) throw new ApiError(400, `Unknown photo filter “${fid}”.`)
         }
+        // Branding logos = sponsors / host / venue / team artwork (NOT the
+        // org logo). Optional, up to 15; each template places them at its
+        // reserved footer positions.
+        let logos = Array.isArray(branding && branding.logos) ? branding.logos.filter((x) => typeof x === 'string' && x) : []
+      if (logos.length > 15) throw new ApiError(400, 'A maximum of 15 logos per event — trim the list.')
+        if (!logos.length && branding && branding.logoUrl) logos = [branding.logoUrl]
         const ev = {
           id: uid('evt'), organizationId: orgId, name: String(name).trim(),
           location: location || '', clientName: clientName || '',
@@ -737,7 +826,7 @@ export function handle(method, path, body, token) {
           templateIds: tids,
           filters: fids,
           digitalCopy: !!digitalCopy,
-          branding: { logoUrl: (branding && branding.logoUrl) || null, tagline: (branding && branding.tagline) || '' },
+          branding: { logos, tagline: (branding && branding.tagline) || '' },
           shortCode: name.slice(0, 4).toUpperCase().replace(/[^A-Z]/g, '') + String(Math.floor(10 + Math.random() * 90)),
           createdAt: NOW().toISOString(),
         }
@@ -803,6 +892,39 @@ export function handle(method, path, body, token) {
           return { ...d, online: computeDeviceOnline(d), assignedEvent: ev ? { id: ev.id, name: ev.name, status: computeEventStatus(ev) } : null }
         })
         return { status: 200, data: { devices, limit: { used: devices.length, allowed: ps.deviceLimit }, canRegister: !orgPlanBlocked && devices.length < ps.deviceLimit } }
+      }
+      if (p3 && method === 'PUT') {
+        // Rename a device and/or set the on-ground booth operator
+        // (name + phone). Org Admin AND Org Manager may both do this —
+        // whoever assigns an operator records the contact here so the
+        // rest of the team knows who is standing at the booth.
+        authed(PERMS.EVENTS_DEVICES_MANAGE)
+        const d = db.devices.find((x) => x.id === p3 && x.organizationId === orgId)
+        if (!d) throw new ApiError(404, 'Device not found.')
+        const changes = []
+        if (body && body.deviceName != null) {
+          const name = String(body.deviceName).trim()
+          if (!name) throw new ApiError(400, 'Device name cannot be empty.')
+          if (name !== d.deviceName) { changes.push(`renamed “${d.deviceName}” → “${name}”`); d.deviceName = name }
+        }
+        if (body && body.operatorName !== undefined) {
+          const v = String(body.operatorName || '').trim() || null
+          if (v && !d.operatorName) changes.push(`operator ${v} assigned`)
+          else if (!v && d.operatorName) changes.push(`operator ${d.operatorName} removed`)
+          else if (v && v !== d.operatorName) changes.push(`operator changed to ${v}`)
+          d.operatorName = v
+        }
+        if (body && body.operatorPhone !== undefined) {
+          const v = String(body.operatorPhone || '').trim() || null
+          if (v && v.length > 20) throw new ApiError(400, 'Phone number looks too long.')
+          d.operatorPhone = v
+        }
+        if (changes.length) {
+          logAudit(db, { actorId: u.id, action: 'device.updated', entity: 'device', summary: `${d.deviceName}: ${changes.join(', ')}`, organizationId: orgId })
+          persist()
+        }
+        const ev = d.assignedEventId ? db.events.find((e) => e.id === d.assignedEventId) : null
+        return { status: 200, data: { device: { ...d, online: computeDeviceOnline(d), assignedEvent: ev ? { id: ev.id, name: ev.name, status: computeEventStatus(ev) } : null } } }
       }
     }
     if (p2 === 'devices' && p3 && parts[3] === 'assign' && method === 'POST') {
@@ -892,17 +1014,10 @@ export function handle(method, path, body, token) {
     }
 
     if (p2 === 'defaults') {
-      // Frames are always presented as the FULL platform catalogue:
-      // entries saved by the org override price/allowed; catalogue frames
-      // the org has never touched appear disabled at the suggested price.
-      const fullFrames = (saved) => {
-        const list = saved && Array.isArray(saved.frames) ? saved.frames : []
-        return db.frames.map((f) => {
-          const entry = list.find((x) => x.frameId === f.id)
-          if (entry) return { frameId: f.id, price: Math.max(0, Number(entry.price) || 0), allowed: !!entry.allowed }
-          return { frameId: f.id, price: f.defaultPrice, allowed: false }
-        })
-      }
+      // Layouts & print pricing. The catalogue of 16 layout families and
+      // their slot iterations is shared contract data (src/lib/layouts.js);
+      // the org's saved document only carries its price overrides.
+      const fullPrices = (saved) => ({ ...suggestedPriceMap(), ...((saved && saved.layoutPrices) || {}) })
       if (method === 'GET') {
         authed(PERMS.DEFAULTS_VIEW)
         const saved = db.orgDefaults[orgId]
@@ -912,7 +1027,7 @@ export function handle(method, path, body, token) {
             name: (saved && saved.name) || org.name,
             logoUrl: (saved && saved.logoUrl) || null,
             boothTimeoutSec: (saved && saved.boothTimeoutSec) || 600,
-            frames: fullFrames(saved),
+            layoutPrices: fullPrices(saved),
           },
         }
       }
@@ -923,7 +1038,7 @@ export function handle(method, path, body, token) {
           name: saved.name || org.name,
           logoUrl: saved.logoUrl || null,
           boothTimeoutSec: saved.boothTimeoutSec || 600,
-          frames: fullFrames(saved),
+          layoutPrices: fullPrices(saved),
         }
         if (body.name) { cur.name = String(body.name).trim(); org.name = cur.name }
         if (body.logoUrl != null) cur.logoUrl = body.logoUrl
@@ -932,18 +1047,22 @@ export function handle(method, path, body, token) {
           if (!Number.isFinite(sec) || sec < 10 || sec > 86400) throw new ApiError(400, 'Booth idle timeout must be between 10 and 86400 seconds.')
           cur.boothTimeoutSec = sec
         }
-        if (Array.isArray(body.frames)) {
-          // frame ids must exist in the platform catalogue; price >= 0.
-          // Frames the org did not send are kept (unseen frames stay disabled).
-          const sent = body.frames.map((f) => {
-            const meta = db.frames.find((x) => x.id === f.frameId)
-            if (!meta) throw new ApiError(400, `Frame “${f.frameId}” does not exist.`)
-            return { frameId: f.frameId, price: Math.max(0, Number(f.price) || 0), allowed: !!f.allowed }
-          })
-          cur.frames = fullFrames({ frames: sent.concat(cur.frames.filter((x) => !sent.some((s) => s.frameId === x.frameId))) })
+        if (body.layoutPrices != null) {
+          if (typeof body.layoutPrices !== 'object') throw new ApiError(400, 'layoutPrices must be an object of "familyId:slots" → price.')
+          const prices = { ...cur.layoutPrices }
+          for (const [k, v] of Object.entries(body.layoutPrices)) {
+            const [fid, slotsStr] = String(k).split(':')
+            const family = LAYOUT_FAMILIES.find((f) => f.id === fid)
+            const slots = Number(slotsStr)
+            if (!family || !family.slots.includes(slots)) throw new ApiError(400, `Unknown layout iteration "${k}".`)
+            const price = Number(v)
+            if (!Number.isFinite(price) || price < 0 || price > 100000) throw new ApiError(400, `Price for "${k}" must be between 0 and 100000.`)
+            prices[k] = Math.round(price)
+          }
+          cur.layoutPrices = prices
         }
         db.orgDefaults[orgId] = cur
-        logAudit(db, { actorId: u.id, action: 'organisation.defaults.updated', entity: 'organisation', summary: `Organisation defaults updated for ${org.name}`, organizationId: orgId })
+        logAudit(db, { actorId: u.id, action: 'organisation.defaults.updated', entity: 'organisation', summary: `Layout prices / defaults updated for ${org.name}`, organizationId: orgId })
         persist()
         return { status: 200, data: cur }
       }
@@ -1086,10 +1205,26 @@ export function handle(method, path, body, token) {
   function withTicketRefs(t) {
     const ev = t.eventId ? db.events.find((e) => e.id === t.eventId) : null
     const dev = t.deviceId ? db.devices.find((d) => d.id === t.deviceId) : null
+    // Resolve booth-session ids (template, event, device) into display names.
+    let session = t.session || null
+    if (session) {
+      const pkg = session.package || {}
+      const tpl = pkg.templateId ? db.templates.find((x) => x.id === pkg.templateId) : null
+      session = {
+        ...session,
+        event: ev ? { id: ev.id, name: ev.name } : null,
+        device: dev ? { id: dev.id, name: dev.deviceName } : null,
+        package: {
+          ...pkg,
+          templateName: pkg.templateName || (tpl ? tpl.name : pkg.template) || null,
+        },
+      }
+    }
     return {
       ...t,
       event: ev ? { id: ev.id, name: ev.name } : null,
       device: dev ? { id: dev.id, name: dev.deviceName } : null,
+      session,
     }
   }
 }

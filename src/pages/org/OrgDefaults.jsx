@@ -3,29 +3,22 @@
 // What lives here (and nothing else):
 //   • Identity            — organisation name + logo
 //   • Booth behaviour     — idle timeout, in SECONDS
-//   • Frames              — EVERY platform frame, rendered with the same
-//                           consistent FramePreview used on the platform's
-//                           Templates & Frames page: a frame is the canvas
-//                           a print is made on, and the org admin sets
-//                           each frame's price and whether it is available
-//                           at their booths.
+//   • Layouts & pricing   — the 16 platform layout families (cut sizes)
+//                           with their image-slot iterations. The org
+//                           admin sets the guest-facing price per
+//                           iteration; a cleared price removes that
+//                           layout from the booth.
 //
-// There is NO pricing section (no base print price, no download price)
-// and no per-event pricing anywhere in the CRM.
+// There is no per-event pricing anywhere in the CRM — this is the only
+// place print prices live.
 
 import { useEffect, useState } from 'react'
 import { api } from '../../api/index.js'
 import { useApp } from '../../context/AppContext.jsx'
-import { Card, CardHead, Field, TextInput, Button, PageLoader, Toggle, WarnBanner } from '../../components/ui.jsx'
+import { Card, CardHead, Field, TextInput, Button, PageLoader, WarnBanner } from '../../components/ui.jsx'
 import { Icon } from '../../lib/icons.jsx'
-import { FRAME_BY_ID } from '../../lib/frames.js'
-import { architectureFor } from '../../lib/templates.js'
+import { LAYOUT_FAMILIES, LAYOUTS, PRICE_KEY } from '../../lib/layouts.js'
 import { ROLES } from '../../lib/roles.js'
-import FramePreview from '../../components/FramePreview.jsx'
-
-// Representative layout used to preview every frame the same way everywhere
-// (portrait 4x6, single photo slot + 15% branding footer).
-const PREVIEW_TEMPLATE = architectureFor('portrait', 1)
 
 const TIMEOUT_PRESETS = [
   { label: '10s', value: 10 },
@@ -52,11 +45,14 @@ export default function OrgDefaults() {
     setD((x) => ({ ...x, [k]: v }))
     setDirty(true)
   }
-  const setFrame = (i, k, v) => {
+  const setPrice = (familyId, slots, v) => {
     if (readOnly) return
+    const key = PRICE_KEY(familyId, slots)
     setD((x) => {
-      const frames = x.frames.map((f, j) => (j === i ? { ...f, [k]: v } : f))
-      return { ...x, frames }
+      const prices = { ...x.layoutPrices }
+      if (v === '' || v == null) delete prices[key]
+      else prices[key] = Math.max(0, Number(v) || 0)
+      return { ...x, layoutPrices: prices }
     })
     setDirty(true)
   }
@@ -83,7 +79,7 @@ export default function OrgDefaults() {
         name: d.name,
         logoUrl: d.logoUrl,
         boothTimeoutSec: Number(d.boothTimeoutSec) || 600,
-        frames: d.frames.map((f) => ({ frameId: f.frameId, price: Number(f.price) || 0, allowed: !!f.allowed })),
+        layoutPrices: d.layoutPrices,
       })
       setD(saved)
       setDirty(false)
@@ -95,7 +91,7 @@ export default function OrgDefaults() {
     }
   }
 
-  const enabledCount = d.frames.filter((f) => f.allowed).length
+  const offeredCount = Object.keys(d.layoutPrices || {}).length
 
   return (
     <div>
@@ -103,8 +99,8 @@ export default function OrgDefaults() {
         <div>
           <div className="page-title">Organisation Defaults</div>
           <div className="page-sub">
-            Your organisation's single configuration surface: identity, booth idle timeout, and which frames are
-            available at your booths — each with its own price. Events never carry prices.
+            Your organisation's single configuration surface: identity, booth idle timeout, and what guests pay for
+            every layout at your booths. Events never carry prices.
           </div>
         </div>
         {readOnly ? null : (
@@ -117,7 +113,7 @@ export default function OrgDefaults() {
       {readOnly ? (
         <div style={{ marginBottom: 14 }}>
           <WarnBanner tone="info" icon="info">
-            Read-only — frame prices, logo and booth settings can only be changed by your Organisation Admin.
+            Read-only — layout prices, logo and booth settings can only be changed by your Organisation Admin.
           </WarnBanner>
         </div>
       ) : dirty ? (
@@ -132,7 +128,7 @@ export default function OrgDefaults() {
           <div style={{ padding: '18px 20px' }}>
             <div className="row gap-16 mb-16" style={{ alignItems: 'center' }}>
               {d.logoUrl ? (
-                <img src={d.logoUrl} alt="logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: '#fff' }} />
+                <img src={d.logoUrl} alt="logo" style={{ width: 64, height: 64, objectFit: 'contain', borderRadius: 12, border: '1px solid var(--line)', background: 'var(--surface)' }} />
               ) : (
                 <span className="stat-ico" style={{ width: 64, height: 64, borderRadius: 14, background: 'var(--hp-pink-soft)', color: 'var(--hp-pink)', flex: 'none' }}>
                   <Icon name="camera" size={28} />
@@ -186,7 +182,7 @@ export default function OrgDefaults() {
                     style={{
                       padding: '5px 12px', borderRadius: 999, fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       border: `1.5px solid ${Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink)' : 'var(--line)'}`,
-                      background: Number(d.boothTimeoutSec) === p.value ? 'rgba(234,9,127,0.07)' : 'var(--surface)',
+                      background: Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink-soft)' : 'var(--surface)',
                       color: Number(d.boothTimeoutSec) === p.value ? 'var(--hp-pink-deep)' : 'var(--ink-2)',
                     }}
                   >
@@ -199,60 +195,74 @@ export default function OrgDefaults() {
         </Card>
       </div>
 
-      <Card className="mt-14" style={{ marginTop: 14 }}>
+      <Card style={{ marginTop: 14 }}>
         <CardHead
-          title={`Frames · ${enabledCount}/${d.frames.length} available at your booths`}
-          sub="Every platform frame, rendered exactly as it will print. Set each frame's price and whether it's available on your booths — this is where print pricing lives, never on events."
+          title={`Layouts & print pricing · ${LAYOUTS.length} layout variants on ${LAYOUT_FAMILIES.length} cut sizes`}
+          sub="Guests pick a layout at the booth (orientation → image count → page size) and see these prices. Set a price to offer a layout; clear it to remove the layout from your booths. Managers have read-only access."
         />
-        <div className="table-wrap">
-          <table className="hp-table">
-            <thead>
-              <tr>
-                <th style={{ width: 90 }}>Frame</th>
-                <th>Frame</th>
-                <th style={{ width: 170 }}>Price per print</th>
-                <th className="t-right" style={{ width: 150 }}>Available on booth</th>
-              </tr>
-            </thead>
-            <tbody>
-              {d.frames.map((f, i) => {
-                const meta = FRAME_BY_ID[f.frameId]
-                return (
-                  <tr key={f.frameId} style={f.allowed ? undefined : { opacity: 0.62 }}>
-                    <td style={{ width: 90 }}>
-                      <FramePreview frame={meta} template={PREVIEW_TEMPLATE} width={58} branding={{ tagline: d.name }} />
-                    </td>
-                    <td>
-                      <div className="fw6 t13">{meta?.name || f.frameId}</div>
-                      <div className="t11 muted mt-8" style={{ maxWidth: 340 }}>{meta?.description}</div>
-                    </td>
-                    <td>
-                      <div className="row gap-8">
-                        <span className="t13 muted">₹</span>
+        <div style={{ padding: '16px 20px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 12 }}>
+          {LAYOUT_FAMILIES.map((f) => (
+            <div
+              key={f.id}
+              style={{
+                border: '1px solid var(--line)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)',
+                padding: '13px 15px', display: 'flex', flexDirection: 'column', gap: 10,
+              }}
+            >
+              <div className="row between" style={{ gap: 8 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="t13 fw6 ellipsis">{f.name}</div>
+                  <div className="t11 faint">{f.blurb}</div>
+                </div>
+                <span className="chip chip-neutral" style={{ flex: 'none' }} title="Print code">{f.code}</span>
+              </div>
+              <div className="row wrap gap-6 t11 muted">
+                <span className="chip chip-info" style={{ height: 19, fontSize: 10.5 }}>cut {f.cutout[0]}×{f.cutout[1]} in</span>
+                {f.sheets.map((sh) => (
+                  <span key={sh} className="chip chip-neutral" style={{ height: 19, fontSize: 10.5 }} title="Native media / sheet">sheet {sh}</span>
+                ))}
+              </div>
+              <div className="row wrap gap-8">
+                {f.slots.map((sl) => {
+                  const val = d.layoutPrices?.[PRICE_KEY(f.id, sl)]
+                  return (
+                    <div
+                      key={sl}
+                      style={{
+                        border: `1.5px solid ${val != null ? 'var(--line)' : 'var(--line-soft)'}`,
+                        borderRadius: 'var(--r-sm)', padding: '7px 10px 8px', background: 'var(--surface)',
+                        opacity: val != null ? 1 : 0.62, minWidth: 86,
+                      }}
+                    >
+                      <div className="row gap-6 t11" style={{ marginBottom: 4 }}>
+                        <span className="fw6" style={{ color: val != null ? 'var(--hp-pink-deep)' : 'var(--faint)' }}>{sl}</span>
+                        <span className="faint">image{sl > 1 ? 's' : ''}</span>
+                      </div>
+                      <div className="row gap-6">
+                        <span className="t12 muted">₹</span>
                         <TextInput
                           type="number"
-                          value={f.price}
-                          onChange={(e) => setFrame(i, 'price', Math.max(0, Number(e.target.value) || 0))}
+                          placeholder="—"
+                          value={val != null ? val : ''}
+                          onChange={(e) => setPrice(f.id, sl, e.target.value)}
                           disabled={readOnly}
-                          style={{ width: 90, height: 32, fontSize: 13, ...disabledInput }}
+                          title={val != null ? `Guests pay ₹${val} for ${f.name} (${sl} images)` : 'No price — layout hidden from guests'}
+                          style={{ width: 64, height: 28, fontSize: 12.5, padding: '0 8px', ...disabledInput }}
                         />
                       </div>
-                    </td>
-                    <td className="t-right">
-                      <Toggle on={f.allowed} onChange={(v) => setFrame(i, 'allowed', v)} disabled={readOnly} />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--line-soft)' }}>
-          <p className="t11 faint">
+          <p className="t11 faint" style={{ lineHeight: 1.6 }}>
             <Icon name="shield" size={12} style={{ verticalAlign: '-1px', marginRight: 4 }} />
-            A frame is the canvas a print is made on — photos plus the 15% branding footer are all printed on it.
-            The catalogue itself is a platform asset (the Owner adds/removes frames); here you only set prices and
-            booth availability. Organisation Managers cannot change any of this.
+            Every layout exists in vertical AND horizontal ({LAYOUTS.length} variants in all — both orientations share
+            one price). Currently <b>{offeredCount}</b> iteration(s) are priced and visible to guests at your booths.
+            The layout catalogue itself is a platform asset; here you only set what your booths charge.
           </p>
         </div>
       </Card>

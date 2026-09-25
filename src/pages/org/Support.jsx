@@ -1,10 +1,10 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/index.js'
 import { useApp } from '../../context/AppContext.jsx'
-import { Card, Chip, PageLoader, Select, Button, Drawer, TextArea, EmptyState, Field } from '../../components/ui.jsx'
+import { Card, Chip, PageLoader, Select, Button, Drawer, TextArea, EmptyState } from '../../components/ui.jsx'
 import { Icon } from '../../lib/icons.jsx'
-import { relativeTime, dateMed, initials, avatarColor } from '../../lib/format.js'
-import { TICKET_STATUSES, TICKET_PRIORITIES } from '../../lib/plans.js'
+import { relativeTime, dateMed, initials, avatarColor, inr } from '../../lib/format.js'
+import { TICKET_STATUSES, TICKET_PRIORITIES, FILTER_BY_ID } from '../../lib/plans.js'
 
 const CATEGORY_ICONS = { device: 'monitor', payment: 'wallet', photo: 'image', event: 'calendar', general: 'headset' }
 
@@ -199,17 +199,8 @@ export default function Support() {
               <Chip tone="neutral">{ticket.category}</Chip>
               {ticket.device ? <Chip tone="info">Booth: {ticket.device.name}</Chip> : null}
             </div>
-            {ticket.guest?.name ? (
-              <div className="card card-pad mb-16" style={{ background: 'var(--surface-2)', borderColor: 'var(--line-soft)' }}>
-                <div className="row gap-10">
-                  <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: avatarColor(ticket.guest.name) }}>{initials(ticket.guest.name)}</span>
-                  <div>
-                    <div className="t13 fw6">{ticket.guest.name}</div>
-                    <div className="t11 muted">{ticket.guest.contact || 'No contact provided'}</div>
-                  </div>
-                </div>
-              </div>
-            ) : null}
+
+            <SessionContext ticket={ticket} />
 
             <div>
               {ticket.messages.map((m) => {
@@ -233,12 +224,151 @@ export default function Support() {
                 <div className="row gap-8 t12 fw7 mb-8" style={{ color: 'var(--hp-green-ink)' }}>
                   <Icon name="check-circle" size={14} /> RESOLUTION
                 </div>
-                <p className="t13" style={{ color: '#3D5C11' }}>{ticket.resolution}</p>
+                <p className="t13" style={{ color: 'var(--hp-green-ink)' }}>{ticket.resolution}</p>
               </div>
             ) : null}
           </div>
         )}
       </Drawer>
+    </div>
+  )
+}
+
+// ---------------- Booth session context ----------------
+// The booth app records the guest's session and attaches it when a ticket is
+// raised (after session end / after payment): guest phone number, slot they
+// picked, camera clicks, what they customised, and the payment transaction.
+// The CRM just displays this snapshot — it is created by the booth via
+// POST /api/booth/tickets.
+
+const timeStr = (iso) => {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d)) return '—'
+  let h = d.getHours()
+  const ampm = h >= 12 ? 'PM' : 'AM'
+  h = h % 12 || 12
+  return `${h}:${String(d.getMinutes()).padStart(2, '0')} ${ampm}`
+}
+const sameDay = (a, b) => {
+  const x = new Date(a); const y = new Date(b)
+  return x && y && x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate()
+}
+const slotRange = (slot) => {
+  if (!slot) return null
+  if (slot.start && slot.end && sameDay(slot.start, slot.end)) return `${timeStr(slot.start)} – ${timeStr(slot.end)}`
+  if (slot.start && slot.end) return `${dateMed(slot.start)} → ${timeStr(slot.end)}`
+  return null
+}
+const PAY_CHIP = { paid: 'active', pending: 'warn', failed: 'danger' }
+
+function SessionContext({ ticket }) {
+  const s = ticket.session
+  if (!s) {
+    return (
+      <div className="card card-pad mb-16" style={{ background: 'var(--surface-2)', borderColor: 'var(--line-soft)' }}>
+        <div className="row gap-10">
+          <span className="avatar" style={{ width: 30, height: 30, fontSize: 11, background: avatarColor(ticket.guest?.name || '?') }}>{initials(ticket.guest?.name || '?')}</span>
+          <div>
+            <div className="t13 fw6">{ticket.guest?.name || 'Guest'}</div>
+            <div className="t11 muted">{ticket.guest?.contact || 'No contact provided'}</div>
+          </div>
+        </div>
+        <p className="t11 faint mt-12" style={{ lineHeight: 1.5 }}>
+          No booth session attached to this ticket — raised outside a booth session.
+        </p>
+      </div>
+    )
+  }
+
+  const pkg = s.package || {}
+  const pay = s.payment || null
+  const duration = s.startedAt && s.endedAt ? Math.max(1, Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000)) : null
+  const filters = (s.filtersUsed || []).map((f) => FILTER_BY_ID[f]?.label || f)
+
+  return (
+    <div className="card mb-16" style={{ overflow: 'hidden' }}>
+      {/* Guest + phone (what the booth collected when raising the ticket) */}
+      <div className="row between gap-12 wrap" style={{ padding: '13px 16px', borderBottom: '1px solid var(--line-soft)', background: 'var(--surface-2)' }}>
+        <div className="row gap-10">
+          <span className="avatar" style={{ width: 34, height: 34, fontSize: 12, background: avatarColor(ticket.guest?.name || s.phone) }}>{initials(ticket.guest?.name || '?')}</span>
+          <div>
+            <div className="t13 fw6">{ticket.guest?.name || 'Guest'}</div>
+            <div className="t11 muted">Guest phone from the booth session</div>
+          </div>
+        </div>
+        {s.phone ? (
+          <a className="btn btn-sm btn-outline" href={`tel:${s.phone.replace(/[^+\d]/g, '')}`} title="Call the guest">
+            <Icon name="phone" size={13} /> {s.phone}
+          </a>
+        ) : (
+          <Chip tone="neutral">No phone</Chip>
+        )}
+      </div>
+
+      {/* Session snapshot */}
+      <div style={{ padding: '13px 16px' }}>
+        <div className="row between wrap gap-8" style={{ marginBottom: 8 }}>
+          <div className="sess-block-title" style={{ marginBottom: 0 }}>
+            <Icon name="camera" size={13} /> Booth session {s.id ? <span className="num" style={{ letterSpacing: '0.04em' }}>· {s.id}</span> : null}
+          </div>
+          {duration ? <span className="t11 faint num">{duration} min · ended {relativeTime(s.endedAt)}</span> : null}
+        </div>
+
+        <div className="sess-grid">
+          {/* Slot the guest picked — label AND time shown separately */}
+          <div>
+            <KV2 k="Slot picked" v={s.slot?.label || '—'} />
+            <KV2 k="Slot time" v={slotRange(s.slot) || '—'} />
+            {s.event ? <KV2 k="Event" v={s.event.name} /> : null}
+            {s.device ? <KV2 k="Booth" v={s.device.name} /> : null}
+          </div>
+          {/* What they customised + clicked */}
+          <div>
+            <KV2 k="Camera clicks" v={`${s.cameraClicks ?? '—'} click${s.cameraClicks === 1 ? '' : 's'}`} />
+            <KV2 k="Template used" v={pkg.templateName || '—'} />
+            <KV2 k="Frame" v={pkg.frame || '—'} />
+            <KV2 k="Prints" v={pkg.prints != null ? `${pkg.prints} print${pkg.prints === 1 ? '' : 's'}${pkg.digitalCopy ? ' + digital copy' : ''}` : '—'} />
+          </div>
+        </div>
+
+        {filters.length ? (
+          <div className="row wrap gap-6" style={{ marginTop: 9 }}>
+            <span className="t11 faint">Filters used:</span>
+            {filters.map((f) => <Chip key={f} tone="purple">{f}</Chip>)}
+          </div>
+        ) : null}
+
+        {/* Payment transaction */}
+        <div style={{ marginTop: 11, padding: '10px 12px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--line-soft)' }}>
+          <div className="sess-block-title"><Icon name="wallet" size={12} /> Payment</div>
+          {pay && (pay.utr || pay.amount != null) ? (
+            <div className="row between wrap gap-8">
+              <div className="row gap-10 wrap">
+                <span className="t12 muted">Txn&nbsp;
+                  {pay.utr
+                    ? <b className="num" style={{ fontSize: 12.5, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{pay.utr}</b>
+                    : <b style={{ fontSize: 12.5 }}>no UTR</b>}
+                </span>
+                <span className="t12 muted">Amount&nbsp;<b className="num" style={{ color: 'var(--ink)' }}>{inr(pay.amount)}</b></span>
+                {pay.method ? <span className="t12 muted">via&nbsp;<b style={{ color: 'var(--ink)' }}>{pay.method}</b></span> : null}
+              </div>
+              <Chip tone={PAY_CHIP[pay.status] || 'neutral'} dot>{pay.status || 'unknown'}</Chip>
+            </div>
+          ) : (
+            <span className="t12 faint">No payment in this session.</span>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function KV2({ k, v }) {
+  return (
+    <div className="sess-kv">
+      <span className="k">{k}</span>
+      <span className="v ellipsis" title={String(v)}>{v}</span>
     </div>
   )
 }

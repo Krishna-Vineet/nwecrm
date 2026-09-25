@@ -11,7 +11,7 @@ import { statusMeta } from '../../lib/plans.js'
 import { demoReset } from '../../api/client.js'
 
 function UserMenu() {
-  const { user, logout, useMock } = useApp()
+  const { user, logout, useMock, theme, toggleTheme } = useApp()
   const [open, setOpen] = useState(false)
   const ref = useRef(null)
 
@@ -43,6 +43,10 @@ function UserMenu() {
           </div>
           <button className="usermenu-item" onClick={() => { setOpen(false); navigate('/profile') }}>
             <Icon name="user" size={15} /> Profile
+          </button>
+          <button className="usermenu-item" onClick={toggleTheme}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={15} />
+            {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </button>
           {useMock && (
             <button className="usermenu-item" onClick={() => { setOpen(false); demoReset() }}>
